@@ -1,3 +1,4 @@
+from typing import Optional
 from states.accommodation_constraints import AccommodationConstraint
 from states.trip_state import TripState
 
@@ -33,3 +34,4 @@ def parse_feedback_node(state: TripState):
     print(f"parse_feedback_node(): state: {state}")
 
     return state
+    
