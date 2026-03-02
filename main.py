@@ -1,16 +1,37 @@
-from orchestration.graph import trip_graph
+from fastapi import FastAPI
+from starlette.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+from api import router
 
 
-initial_state = {
-    "destination": "Kyoto",
-    "days": 5,
-    "preferences": ["culture", "food"],
-    "status": "planning",
-    "feedback": "The hotel is so expensive. Is there any other hotel that costs less than 200 per night?"
-    #The hotel is so expensive. I would like to stay at its half price or less. In addition, I don't want live in the city center.
-}
+def get_application() -> FastAPI:
 
-final_state = trip_graph.invoke(initial_state)
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
 
-print("=== FINAL TRIP PLAN ===")
-print(f"final_state: {final_state}")
+        yield
+
+    
+    app = FastAPI(title="Trip Planning App with Agents", lifespan=lifespan)  #**settings.fastapi_kwargs
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+        allow_credentials=True
+    )
+
+
+    app.include_router(router, tags=["trip"])
+
+    return app
+
+
+app = get_application()
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("main:app", host="0.0.0.0", port=9988)

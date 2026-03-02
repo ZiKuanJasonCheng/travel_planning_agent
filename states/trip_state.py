@@ -1,9 +1,11 @@
-from typing import TypedDict, List, Optional
+from typing import TypedDict, List, Optional, Literal
 from states.accommodation_constraints import AccommodationConstraint
+from orchestration.tracability import DecisionTrace
 
 
 class TripState(TypedDict, total=False):
     destination: str
+    days: Optional[int]
     sub_destinations: List[str]
     preferences: List[str]
 
@@ -14,6 +16,9 @@ class TripState(TypedDict, total=False):
     feedback: Optional[str]
     constraints: AccommodationConstraint
 
-    rerun_target: Optional[str]
+    #rerun_target: Optional[str]
+    traces: List[DecisionTrace]
 
-    status: str
+    dirty_agents: list[str]
+
+    status: Literal["planning", "is_waiting_for_feedback", "completed"]

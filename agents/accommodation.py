@@ -1,36 +1,53 @@
 from states.trip_state import TripState
+from orchestration.tracability import log_trace
+from copy import deepcopy
 
 
 def accommodation_agent(state: TripState) -> TripState:
-    #feedback = state.get("feedback", "").lower()
-    #print(f"accommodation_agent(): feedback: {feedback}")
+    constraints = state.get("constraints", {})
     
-    constraints = state.get("constraints", "")
+    log_trace(
+        state,
+        node="accommodation_agent",
+        action="execute",
+        reason="Generating hotel recommendations",
+        inputs={"constraints": deepcopy(constraints)}
+    )
 
-    
-    #if "expensive" in feedback:
+
     if "budget" in constraints:
         max_price_per_night = constraints["budget"]
-        state["accommodation_options"] = [
-            {
-                "name": "Holiday Inn",
-                "price_per_night": max_price_per_night,
-                "area": "suburban area"
-            }
-        ]
-        # Clean the 'budget' field from constraints
-        state["constraints"].pop("budget")
+        default_option = {
+            "name": "Holiday Inn",
+            "price_per_night": max_price_per_night,
+            "area": "suburban area"
+        }
+
+        if not state["accommodation_options"]:
+            state["accommodation_options"] = [default_option]
+        else:
+            if isinstance(state["accommodation_options"][0], dict) and state["accommodation_options"][0]:
+                state["accommodation_options"][0]["price_per_night"] = max_price_per_night
+            else:
+                state["accommodation_options"][0] = default_option
+                
     
     if "preference" in constraints:
-        state["accommodation_options"] = [
-            {
-                "name": "Hotel Sakura",
-                "price_per_night": 1500,
-                "area": constraints["preference"]["area"]
-            }
-        ]
-        # Clean the 'preference' field from constraints
-        state["constraints"].pop("preference")
+        default_option = {
+            "name": "Hotel Sakura",
+            "price_per_night": 1500,
+            "area": constraints["preference"]["area"]
+        }
+
+        if not state["accommodation_options"]:
+            state["accommodation_options"] = [default_option]
+        else:
+            if isinstance(state["accommodation_options"][0], dict) and state["accommodation_options"][0]:
+                state["accommodation_options"][0]["area"] = constraints["preference"]["area"]
+            else:
+                state["accommodation_options"][0] = default_option
+        
+        
 
     if not state.get("accommodation_options"):
         state["accommodation_options"] = [
@@ -41,6 +58,14 @@ def accommodation_agent(state: TripState) -> TripState:
             }
         ]
 
+
+    log_trace(
+        state,
+        node="accommodation_agent",
+        action="complete recommendations",
+        reason="Hotel recommendations generated",
+        outputs={"accommodation_options": deepcopy(state["accommodation_options"])}  #"hotel_count": len(hotels)
+    )
 
     print(f"accommodation_agent(): state: {state}")
 
