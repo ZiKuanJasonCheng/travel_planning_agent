@@ -1,18 +1,49 @@
 from fastapi import Query, FastAPI, APIRouter, Response, status
 from session import create_session, get_session, update_session
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from typing import Optional, List
+from datetime import date, timedelta
 
 from orchestration.human_feedback import apply_user_feedback
 from orchestration.graph_runner import run_until_needing_feedback_or_finished
+from orchestration.llm_feedback_parsing import parse_feedback_with_llm
 
 router = APIRouter()
 
 
 class RequestModel(BaseModel):
     destination: str
-    days: int
+    origin: str                        # departure city / location
+    num_people: int = 1                # total number of travelers
+    days: Optional[int] = None
     preferences: Optional[List] = []
+    start_date: Optional[str] = None  # YYYY-MM-DD
+    end_date: Optional[str] = None    # YYYY-MM-DD
+
+    @model_validator(mode="after")
+    def resolve_and_validate_dates(self) -> "RequestModel":
+        start = self._parse_iso_date(self.start_date, "start_date")
+        end = self._parse_iso_date(self.end_date, "end_date")
+
+        if start and end:
+            if end < start:
+                raise ValueError("end_date must be on or after start_date")
+            self.days = (end - start).days or 1
+        elif start and self.days is not None:
+            self.end_date = (start + timedelta(days=self.days)).strftime("%Y-%m-%d")
+        elif self.days is None:
+            self.days = 1  # default
+
+        return self
+
+    @staticmethod
+    def _parse_iso_date(value: Optional[str], field: str) -> Optional[date]:
+        if value is None:
+            return None
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            raise ValueError(f"{field} must be a valid ISO date (YYYY-MM-DD)")
 
 class FeedbackModel(BaseModel):
     session_id: str
@@ -21,15 +52,34 @@ class FeedbackModel(BaseModel):
 
 @router.post("/trip/start")
 def start_trip(param: RequestModel):
+    constraints = None
+    if param.preferences:
+        constraints = parse_feedback_with_llm(", ".join(param.preferences))
+    
+    if constraints:
+        constraints = constraints.model_dump()
+        for agent, cons in constraints.items():
+            if not cons:
+                constraints[agent] = {}
+    else:
+        constraints = {}
+
     state = {
         "destination": param.destination,
+        "origin": param.origin,
+        "num_people": param.num_people,
         "days": param.days,
+        "start_date": param.start_date,
+        "end_date": param.end_date,
         "preferences": param.preferences,
+        "constraints": constraints,
         "status": "planning",
+        "log_trace": False,
         "dirty_agents": ["transport_agent", "accommodation_agent", "attraction_agent"],
         "traces": [],
     }
-    
+    print(f"start_trip(): state: {state}")
+
     session_id = create_session(state)
     state = run_until_needing_feedback_or_finished(state)
     update_session(session_id, state)

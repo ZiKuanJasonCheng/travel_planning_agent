@@ -2,7 +2,7 @@ from typing import Optional
 from states.accommodation_constraints import AccommodationConstraint
 from states.trip_state import TripState
 
-
+# Used by an obsolete function
 def parse_feedback(feedback: str) -> AccommodationConstraint:
     """
         Parse feedback into a constraint object
@@ -21,7 +21,7 @@ def parse_feedback(feedback: str) -> AccommodationConstraint:
 
     return constraint
 
-
+# Obsolete
 def parse_feedback_node(state: TripState):
     feedback = state.get("feedback")
 

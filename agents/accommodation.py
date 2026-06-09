@@ -1,72 +1,101 @@
 from states.trip_state import TripState
 from orchestration.tracability import log_trace
+from services.amadeus_hotel import get_amadeus_hotel_service
+from services.booking_hotel import get_booking_hotel_service
 from copy import deepcopy
+from datetime import datetime, timedelta
 
 
 def accommodation_agent(state: TripState) -> TripState:
-    constraints = state.get("constraints", {})
+    constraints = state.get("constraints", {}).get("accommodation", {})
+    destination = state.get("destination", "")
+    days = state.get("days") or 1
+    transport = (state.get("transport_options") or [{}])[0]
     
-    log_trace(
-        state,
-        node="accommodation_agent",
-        action="execute",
-        reason="Generating hotel recommendations",
-        inputs={"constraints": deepcopy(constraints)}
+    if state["log_trace"]:
+        log_trace(
+            state,
+            node="accommodation_agent",
+            action="execute",
+            reason="Generating hotel recommendations",
+            inputs={"constraints": deepcopy(constraints)}
+        )
+
+    max_price_per_night = None
+    preferred_area = None
+
+    if constraints.get("budget"):
+        max_price_per_night = constraints["budget"].get("max_price_per_night")
+    if constraints.get("preference"):
+        preferred_area = constraints["preference"].get("area")
+
+    check_in_date = state.get("start_date") or _default_check_in_date()
+    check_out_date = state.get("end_date") or _default_check_out_date(check_in_date, days)
+    print(f"accommodation_agent(): max_price_per_night: {max_price_per_night}, preferred_area: {preferred_area}, check_in_date: {check_in_date}, check_out_date: {check_out_date}")
+
+    hotels = []
+
+    num_people = state.get("num_people") or 1
+    amadeus_service = get_amadeus_hotel_service()
+    hotels = amadeus_service.search_hotels(
+        destination=destination,
+        check_in_date=check_in_date,
+        check_out_date=check_out_date,
+        adults=num_people,
+        room_quantity=1,
+        max_price_per_night=max_price_per_night,
+        preferred_area=preferred_area,
     )
 
+    # Skip BOOKING.COM API
+    #if not hotels:
+    # booking_service = get_booking_hotel_service()
+    # hotels = booking_service.search_hotels(
+    #     destination=destination,
+    #     check_in_date=check_in_date,
+    #     check_out_date=check_out_date,
+    #     adults=2,  # TBD: to be an input variable
+    #     room_quantity=1,
+    #     max_price_per_night=max_price_per_night,
+    #     preferred_area=preferred_area,
+    # )
 
-    if "budget" in constraints:
-        max_price_per_night = constraints["budget"]
-        default_option = {
-            "name": "Holiday Inn",
-            "price_per_night": max_price_per_night,
-            "area": "suburban area"
-        }
+    if hotels:
+        state["accommodation_options"] = hotels[:3]
+    else:
+        state["accommodation_options"] = [_build_fallback_hotel(max_price_per_night, preferred_area)]
 
-        if not state["accommodation_options"]:
-            state["accommodation_options"] = [default_option]
-        else:
-            if isinstance(state["accommodation_options"][0], dict) and state["accommodation_options"][0]:
-                state["accommodation_options"][0]["price_per_night"] = max_price_per_night
-            else:
-                state["accommodation_options"][0] = default_option
-                
-    
-    if "preference" in constraints:
-        default_option = {
-            "name": "Hotel Sakura",
-            "price_per_night": 1500,
-            "area": constraints["preference"]["area"]
-        }
-
-        if not state["accommodation_options"]:
-            state["accommodation_options"] = [default_option]
-        else:
-            if isinstance(state["accommodation_options"][0], dict) and state["accommodation_options"][0]:
-                state["accommodation_options"][0]["area"] = constraints["preference"]["area"]
-            else:
-                state["accommodation_options"][0] = default_option
-        
-        
-
-    if not state.get("accommodation_options"):
-        state["accommodation_options"] = [
-            {
-                "name": "Artour Hotel",
-                "price_per_night": 5000,
-                "area": "near the station"
-            }
-        ]
-
-
-    log_trace(
-        state,
-        node="accommodation_agent",
-        action="complete recommendations",
-        reason="Hotel recommendations generated",
-        outputs={"accommodation_options": deepcopy(state["accommodation_options"])}  #"hotel_count": len(hotels)
-    )
+    if state["log_trace"]:
+        log_trace(
+            state,
+            node="accommodation_agent",
+            action="complete recommendations",
+            reason="Hotel recommendations generated",
+            outputs={"accommodation_options": deepcopy(state["accommodation_options"])}  #"hotel_count": len(hotels)
+        )
 
     print(f"accommodation_agent(): state: {state}")
 
     return state
+
+
+def _build_fallback_hotel(max_price_per_night, preferred_area):
+    return {
+        "type": "hotel",
+        "name": "Fallback Hotel Option",
+        "price_per_night": max_price_per_night or 200,
+        "currency": "USD",
+        "area": preferred_area or "city center",
+        "supplier": "fallback",
+        "reason": "No supplier inventory returned",
+    }
+
+
+def _default_check_in_date() -> str:
+    return (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+
+
+def _default_check_out_date(check_in_date: str, days: int) -> str:
+    check_in = datetime.strptime(check_in_date, "%Y-%m-%d")
+    nights = max(1, days)
+    return (check_in + timedelta(days=nights)).strftime("%Y-%m-%d")
