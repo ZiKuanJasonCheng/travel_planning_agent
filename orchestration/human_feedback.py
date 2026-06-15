@@ -65,6 +65,5 @@ def human_feedback_checkpoint(state: TripState) -> TripState:
     """
     Change status to be 'is_waiting_for_feedback'
     """
-    state["status"] = "is_waiting_for_feedback"
-    return state
+    return {**state, "status": "is_waiting_for_feedback"}
     

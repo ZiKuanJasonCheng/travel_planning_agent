@@ -81,8 +81,6 @@ def attraction_agent(state: TripState) -> TripState:
         print(f"attraction_agent(): unexpected error: {e}")
         itinerary = _build_fallback_itinerary(destination, days, hotel_area)
 
-    state["itinerary"] = itinerary
-
     # Step 5: log_trace at exit
     if state.get("log_trace"):
         log_trace(
@@ -94,7 +92,7 @@ def attraction_agent(state: TripState) -> TripState:
         )
 
     print(f"attraction_agent(): generated {len(itinerary)} days")
-    return state
+    return {**state, "itinerary": itinerary}
 
 
 def _build_fallback_itinerary(

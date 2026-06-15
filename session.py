@@ -1,5 +1,5 @@
 # We use in-memory first. We can change to use Redis or other DB in the future
-from typing import Dict
+from typing import Dict, Optional
 from states.trip_state import TripState
 import uuid
 
@@ -13,9 +13,9 @@ def create_session(initial_state: TripState) -> str:
     return session_id
     
 
-def get_session(session_id: str) -> TripState:
+def get_session(session_id: str) -> Optional[TripState]:
     global SESSIONS
-    return SESSIONS[session_id]
+    return SESSIONS.get(session_id)
 
 
 def update_session(session_id: str, state: TripState):

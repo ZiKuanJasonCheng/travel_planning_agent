@@ -1,24 +1,31 @@
-from fastapi import Query, FastAPI, APIRouter, Response, status
+from fastapi import Query, FastAPI, APIRouter, Response, status, HTTPException
 from session import create_session, get_session, update_session
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List
 from datetime import date, timedelta
 
 from orchestration.human_feedback import apply_user_feedback
 from orchestration.graph_runner import run_until_needing_feedback_or_finished
 from orchestration.llm_feedback_parsing import parse_feedback_with_llm
+from services.geocoding import check_city_granularity
 
 router = APIRouter()
 
 
 class RequestModel(BaseModel):
-    destination: str
-    origin: str                        # departure city / location
-    num_people: int = 1                # total number of travelers
-    days: Optional[int] = None
-    preferences: Optional[List] = []
+    destination: str = Field(min_length=1, max_length=100)
+    origin: str = Field(min_length=1, max_length=100)
+    num_people: int = Field(default=1, ge=1, le=50)
+    days: Optional[int] = Field(default=None, ge=1, le=365)
+    preferences: Optional[List[str]] = Field(default_factory=list)
     start_date: Optional[str] = None  # YYYY-MM-DD
     end_date: Optional[str] = None    # YYYY-MM-DD
+
+    @field_validator("destination", "origin")
+    @classmethod
+    def validate_city_granularity(cls, v: str) -> str:
+        check_city_granularity(v)
+        return v
 
     @model_validator(mode="after")
     def resolve_and_validate_dates(self) -> "RequestModel":
@@ -46,8 +53,8 @@ class RequestModel(BaseModel):
             raise ValueError(f"{field} must be a valid ISO date (YYYY-MM-DD)")
 
 class FeedbackModel(BaseModel):
-    session_id: str
-    feedback: str
+    session_id: str = Field(min_length=1, max_length=100)
+    feedback: str = Field(min_length=1, max_length=2000)
 
 
 @router.post("/trip/start")
@@ -94,6 +101,8 @@ def start_trip(param: RequestModel):
 @router.post("/trip/feedback")  # /trip/{session_id}/feedback
 def submit_feedback(param: FeedbackModel):
     state = get_session(param.session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Session not found")
     print(f"Retrieved state! state: {state}")
     
     changed = apply_user_feedback(state, param.feedback)

@@ -60,10 +60,10 @@ def accommodation_agent(state: TripState) -> TripState:
     #     preferred_area=preferred_area,
     # )
 
-    if hotels:
-        state["accommodation_options"] = hotels[:3]
-    else:
-        state["accommodation_options"] = [_build_fallback_hotel(max_price_per_night, preferred_area)]
+    accommodation_options = (
+        hotels[:3] if hotels
+        else [_build_fallback_hotel(max_price_per_night, preferred_area)]
+    )
 
     if state["log_trace"]:
         log_trace(
@@ -71,12 +71,12 @@ def accommodation_agent(state: TripState) -> TripState:
             node="accommodation_agent",
             action="complete recommendations",
             reason="Hotel recommendations generated",
-            outputs={"accommodation_options": deepcopy(state["accommodation_options"])}  #"hotel_count": len(hotels)
+            outputs={"accommodation_options": deepcopy(accommodation_options)}
         )
 
-    print(f"accommodation_agent(): state: {state}")
+    print(f"accommodation_agent(): accommodation_options: {accommodation_options}")
 
-    return state
+    return {**state, "accommodation_options": accommodation_options}
 
 
 def _build_fallback_hotel(max_price_per_night, preferred_area):

@@ -6,6 +6,7 @@ from states.trip_state import TripState
 from orchestration.tracability import log_trace
 from services.amadeus_flight import get_flight_service
 from services.airline_iata_resolver import resolve_airline_iata_codes
+from services.city_iata_resolver import resolve_city_iata_codes
 from copy import deepcopy
 from datetime import datetime, timedelta
 from typing import Optional
@@ -51,54 +52,65 @@ def air_ticket_agent(state: TripState) -> TripState:
     departure_date = _calculate_departure_date(state)
     return_date = _calculate_return_date(state, days) if days > 1 else None
 
+    origin_codes = resolve_city_iata_codes(origin)
+    dest_codes = resolve_city_iata_codes(destination)
+
     # Get flight service and search
     flight_service = get_flight_service()
 
     try:
-        flight_options = flight_service.search_flights(
-            origin=_normalize_destination(origin),
-            destination=_normalize_destination(destination),
-            departure_date=departure_date,
-            return_date=return_date,
-            adults=num_people,
-            max_price=max_price,
-            preferred_airlines=preferred_airlines,
-            flight_class=flight_class
+        flight_options = _search_all_combos(
+            flight_service, origin_codes, dest_codes,
+            departure_date, return_date, num_people,
+            max_price, preferred_airlines, flight_class,
         )
-        
-        if flight_options:
-            # Filter and select best options
+
+        if not flight_options and return_date:
+            print("No round-trip flights found. Searching outbound and inbound separately.")
+            outbound_options, inbound_options = _search_one_way_pair(
+                flight_service=flight_service,
+                origin_codes=origin_codes,
+                dest_codes=dest_codes,
+                departure_date=departure_date,
+                return_date=return_date,
+                adults=num_people,
+                max_price=max_price,
+                preferred_airlines=preferred_airlines,
+                flight_class=flight_class,
+            )
+            selected_flights = (
+                _select_best_flights(outbound_options, max_price, preferred_airlines) +
+                _select_best_flights(inbound_options, max_price, preferred_airlines)
+            )
+        elif flight_options:
             selected_flights = _select_best_flights(flight_options, max_price, preferred_airlines)
-            
-            # Update transport_options with flight results
-            # Merge with existing options or replace if this is the first run
-            existing_options = state.get("transport_options", [])
-            
-            # Filter out existing flight options and add new ones
-            non_flight_options = [opt for opt in existing_options if opt.get("type") != "flight"]
-            state["transport_options"] = non_flight_options + selected_flights
         else:
-            print(f"No flights are found! Use fallback option!")
-            # No flights found, use fallback
-            _add_fallback_flight_option(state, destination, max_price, preferred_airlines)
-            
+            selected_flights = []
+
+        if selected_flights:
+            existing_options = state.get("transport_options", [])
+            non_flight_options = [opt for opt in existing_options if opt.get("type") != "flight"]
+            transport_options = non_flight_options + selected_flights
+        else:
+            print("No flights are found! Use fallback option!")
+            transport_options = _build_fallback_flight_options(state, destination, max_price, preferred_airlines)
+
     except Exception as e:
         print(f"Error in air_ticket_agent: {e}")
-        # Fallback to default option
-        _add_fallback_flight_option(state, destination, max_price, preferred_airlines)
-    
+        transport_options = _build_fallback_flight_options(state, destination, max_price, preferred_airlines)
+
     if state.get("log_trace"):
         log_trace(
             state,
             node="air_ticket_agent",
             action="complete recommendations",
             reason="Flight options generated",
-            outputs={"transport_options": deepcopy(state.get("transport_options", []))}
+            outputs={"transport_options": deepcopy(transport_options)}
         )
-    
-    print(f"air_ticket_agent(): Found {len([opt for opt in state.get('transport_options', []) if opt.get('type') == 'flight'])} flight options")
-    
-    return state
+
+    print(f"air_ticket_agent(): Found {len([opt for opt in transport_options if opt.get('type') == 'flight'])} flight options")
+
+    return {**state, "transport_options": transport_options}
 
 
 def _infer_origin(state: TripState) -> str:
@@ -117,38 +129,6 @@ def _infer_origin(state: TripState) -> str:
     # Common defaults: "NYC" (New York), "LAX" (Los Angeles), "SFO" (San Francisco)
     # For international travel, might want to use user's location
     return "HKG"  # Default to Hong Kong
-
-
-def _normalize_destination(destination: str) -> str:
-    """
-    Normalize destination name to airport code
-    This is a simplified version - in production, use a proper geocoding service
-    """
-    # Simple mapping for common destinations
-    destination_map = {
-        "tokyo": "NRT",
-        "tyo": "NRT",
-        "nrt": "NRT",
-        "paris": "CDG",
-        "london": "LHR",
-        "hong kong": "HKG",
-        "hkg": "HKG",
-        "singapore": "SIN",
-        "sin": "SIN",
-        "bangkok": "BKK",
-        "bkk": "BKK",
-        "seoul": "ICN",
-        "icn": "ICN",
-        "sydney": "SYD",
-        "syd": "SYD",
-        "shenzhen": "SZX",
-        "kyoto": "KIX",
-        "osaka": "KIX",
-        "jeju": "CJU"
-    }
-    
-    dest_lower = destination.lower().strip()
-    return destination_map.get(dest_lower, destination.upper()[:3])
 
 
 def _calculate_departure_date(state: TripState) -> str:
@@ -174,6 +154,57 @@ def _calculate_return_date(state: TripState, days: int) -> Optional[str]:
     return return_date.strftime("%Y-%m-%d")
 
 
+def _search_all_combos(
+    flight_service,
+    origin_codes: list[str],
+    dest_codes: list[str],
+    departure_date: str,
+    return_date: Optional[str],
+    adults: int,
+    max_price: Optional[int],
+    preferred_airlines: Optional[list],
+    flight_class: Optional[str],
+) -> list:
+    """Search every origin×destination code combination and return combined results."""
+    results = []
+    for oc in origin_codes:
+        for dc in dest_codes:
+            results.extend(flight_service.search_flights(
+                origin=oc,
+                destination=dc,
+                departure_date=departure_date,
+                return_date=return_date,
+                adults=adults,
+                max_price=max_price,
+                preferred_airlines=preferred_airlines,
+                flight_class=flight_class,
+            ))
+    return results
+
+
+def _search_one_way_pair(
+    flight_service,
+    origin_codes: list[str],
+    dest_codes: list[str],
+    departure_date: str,
+    return_date: str,
+    adults: int,
+    max_price: Optional[int],
+    preferred_airlines: Optional[list],
+    flight_class: Optional[str],
+) -> tuple[list, list]:
+    """Search outbound and inbound as separate one-way tickets; return (outbound, inbound)."""
+    outbound = _search_all_combos(
+        flight_service, origin_codes, dest_codes, departure_date, None,
+        adults, max_price, preferred_airlines, flight_class,
+    )
+    inbound = _search_all_combos(
+        flight_service, dest_codes, origin_codes, return_date, None,
+        adults, max_price, preferred_airlines, flight_class,
+    )
+    return outbound, inbound
+
+
 def _select_best_flights(
     flight_options: list,
     max_price: Optional[int],
@@ -195,18 +226,18 @@ def _select_best_flights(
     return flight_options[:3]
 
 
-def _add_fallback_flight_option(
+def _build_fallback_flight_options(
     state: TripState,
     destination: str,
     max_price: Optional[int],
     preferred_airlines: Optional[list]
-):
+) -> list:
     """
-    Add a fallback flight option when API search fails or returns no results
+    Build fallback flight options when API search fails or returns no results
     """
     airline = preferred_airlines[0] if preferred_airlines else "CX"
     price = max_price if max_price else 500
-    
+
     fallback_option = {
         "type": "flight",
         "to": destination,
@@ -216,7 +247,7 @@ def _add_fallback_flight_option(
         "arrival_time": "22:00:00",
         "reason": "Fallback option (API unavailable)"
     }
-    
+
     existing_options = state.get("transport_options", [])
     non_flight_options = [opt for opt in existing_options if opt.get("type") != "flight"]
-    state["transport_options"] = non_flight_options + [fallback_option]
+    return non_flight_options + [fallback_option]

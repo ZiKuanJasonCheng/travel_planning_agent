@@ -2,7 +2,6 @@
 Amadeus Flight API Service
 Wrapper for Amadeus flight search functionality
 """
-from hashlib import file_digest
 import os
 from typing import Optional, List, Dict, Any
 from amadeus import Client, ResponseError
