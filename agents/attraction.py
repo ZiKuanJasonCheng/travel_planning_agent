@@ -12,6 +12,7 @@ def attraction_agent(state: TripState) -> TripState:
     num_people = state.get("num_people") or 1
     days = state.get("days") or 1
     start_date = state.get("start_date")
+    checker_critique = state.get("checker_critique")
     constraints = state.get("constraints", {}).get("attraction", {})
     transport = (state.get("transport_options") or [{}])[0]
     hotel = (state.get("accommodation_options") or [{}])[0]
@@ -59,6 +60,7 @@ def attraction_agent(state: TripState) -> TripState:
                 num_people=num_people,
                 origin=origin,
                 return_depart_time=return_depart_time,
+                critique=checker_critique,
             )
         else:
             itinerary = llm_service.generate_itinerary(
@@ -73,6 +75,7 @@ def attraction_agent(state: TripState) -> TripState:
                 num_people=num_people,
                 origin=origin,
                 return_depart_time=return_depart_time,
+                critique=checker_critique,
             )
 
         if not itinerary:
@@ -91,8 +94,10 @@ def attraction_agent(state: TripState) -> TripState:
             outputs={"itinerary": deepcopy(itinerary)},
         )
 
+    dirty_agents = list(state.get("dirty_agents", []))  # TBD: to directly add checker_agent to the graph where attraction_agent is followed by checker_agent
+    dirty_agents.append("checker_agent")
     print(f"attraction_agent(): generated {len(itinerary)} days")
-    return {**state, "itinerary": itinerary}
+    return {**state, "itinerary": itinerary, "dirty_agents": dirty_agents}
 
 
 def _build_fallback_itinerary(

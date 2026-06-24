@@ -118,6 +118,7 @@ class LLMItineraryService:
         num_people: int = 1,
         origin: Optional[str] = None,
         return_depart_time: Optional[str] = None,
+        critique: Optional[str] = None,
     ) -> list[dict]:
         if not self.client:
             return []
@@ -142,6 +143,9 @@ Rules:
 Respond ONLY with valid JSON matching this structure:
 {_ACTIVITY_SCHEMA}"""
 
+        if critique:
+            prompt += f"\n\nIMPORTANT — a quality review found these issues in a previous version. You MUST fix them:\n{critique}"
+
         return self._call_llm(prompt, context="generate_itinerary")
 
     def update_itinerary(
@@ -157,6 +161,7 @@ Respond ONLY with valid JSON matching this structure:
         num_people: int = 1,
         origin: Optional[str] = None,
         return_depart_time: Optional[str] = None,
+        critique: Optional[str] = None,
     ) -> list[dict]:
         if not self.client:
             return []
@@ -200,6 +205,9 @@ Rules:
 
 Respond ONLY with valid JSON matching this structure:
 {_ACTIVITY_SCHEMA}"""
+
+        if critique:
+            prompt += f"\n\nIMPORTANT — a quality review found these issues in a previous version. You MUST fix them:\n{critique}"
 
         return self._call_llm(prompt, context="update_itinerary")
 
