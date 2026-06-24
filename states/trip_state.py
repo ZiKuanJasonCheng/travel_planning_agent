@@ -27,3 +27,6 @@ class TripState(TypedDict, total=False):
     dirty_agents: list[str]
 
     status: Literal["planning", "is_waiting_for_feedback", "completed"]
+
+    checker_retry_count: int
+    checker_critique: Optional[str]
