@@ -12,20 +12,21 @@ POST /trip/start ──► LangGraph StateGraph
                     ┌────▼────┐
                     │ buffer  │  (picks next dirty agent)
                     └────┬────┘
-           ┌─────────────┼─────────────┐
-           ▼             ▼             ▼
-      transport    accommodation   attraction
-      (Amadeus      (Amadeus         (LLM
-      flights)       hotels)       itinerary)
-           └─────────────┼─────────────┘
+           ┌─────────────┼──────────────┬──────────┐
+           ▼             ▼              ▼           ▼
+      transport    accommodation   attraction   checker
+      (Amadeus      (Amadeus         (LLM       (GPT-4o
+      flights)       hotels)       itinerary)   review)
+           └─────────────┼──────────────┴──────────┘
                     ┌────▼────┐
                     │ human   │  ◄── POST /trip/feedback
                     │feedback │
                     └─────────┘
 ```
 
-**Agent dependency order:** `transport_agent → accommodation_agent → attraction_agent`  
-When an upstream agent changes, all downstream agents are automatically marked dirty and re-run.
+**Agent dependency order:** `transport_agent → accommodation_agent → attraction_agent → checker_agent`  
+When an upstream agent changes, all downstream agents are automatically marked dirty and re-run.  
+`checker_agent` runs after `attraction_agent` and can trigger up to 2 itinerary re-generations.
 
 ---
 
@@ -35,6 +36,7 @@ When an upstream agent changes, all downstream agents are automatically marked d
 - `transport_agent` — searches round-trip flights via Amadeus Flight Offers API; supports configurable number of travelers.
 - `accommodation_agent` — searches hotels near destination coordinates (geocoded via Nominatim) using the Amadeus Hotel Search API; filters by nightly price in USD.
 - `attraction_agent` — generates a granular day-by-day itinerary via GPT-4o-mini, taking into account flight arrival/departure times, hotel area, budget, style preferences, and group size.
+- `checker_agent` — reviews the generated itinerary with GPT-4o for repeated venues and unreasonable travel distances; queues a retry (up to 2 times) with an actionable critique; surfaces unresolved issues to the user after max retries.
 
 ### Live API Integrations
 | Service | Purpose |
@@ -42,7 +44,9 @@ When an upstream agent changes, all downstream agents are automatically marked d
 | Amadeus Flight Offers API | Round-trip flight search |
 | Amadeus Hotel Search API | Hotels by geocoordinate radius |
 | OpenAI GPT-4o-mini | Itinerary generation, style matching, feedback parsing |
-| Nominatim (OpenStreetMap) | City → latitude/longitude geocoding |
+| OpenAI GPT-4o | Itinerary quality review (checker agent) |
+| Nominatim (OpenStreetMap) | City → latitude/longitude geocoding; geocoding fallback for airport resolution |
+| OurAirports (ourairports.com) | City → IATA code resolution; filters to scheduled commercial service only |
 | Frankfurter API (ECB) | Real-time USD exchange rates (no API key required) |
 
 ### Feedback-Driven Re-Planning
@@ -62,6 +66,13 @@ When an upstream agent changes, all downstream agents are automatically marked d
   - After 6 pm → 1–3 activities
 - LLM generates `short_desc`, selects mix of sightseeing and restaurants, and respects per-ticket budget.
 - Supports `update_itinerary()` mode on feedback re-runs (keeps structure, revises content).
+
+### Itinerary Quality Checking
+- After `attraction_agent` completes, `checker_agent` evaluates the itinerary with GPT-4o for two issue classes:
+  - **Repeated venues** — the same attraction appearing more than once across all days.
+  - **Unreasonable travel** — consecutive activities requiring excessive transit given the destination's geography.
+- On failure, the critique is fed back to `attraction_agent` for up to 2 retry cycles.
+- If issues remain after max retries, they are surfaced to the user via `checker_critique` in the response state.
 
 ### Resilient Hotel ID Fetching
 - Amadeus hotel offers API occasionally returns errors for invalid hotel IDs.
@@ -84,6 +95,7 @@ travel_planning_with_agent/
 │   ├── transport.py               # Calls amadeus_flight.py
 │   ├── accommodation.py           # Calls amadeus_hotel.py
 │   ├── attraction.py              # Calls llm_itinerary_service.py
+│   ├── checker.py                 # Itinerary quality review; retries via attraction_agent
 │   ├── air_ticket.py              # Flight search logic
 │   └── train_ticket.py
 │
@@ -96,16 +108,18 @@ travel_planning_with_agent/
 │   ├── human_feedback.py          # Feedback checkpoint node
 │   ├── feedback_parsing.py        # Keyword-based fallback parser
 │   ├── merge_constraints.py       # Merges new constraints into state
-│   └── tracability.py             # Decision trace types
+│   └── tracability.py             # DecisionTrace model + log_trace() helper
 │
 ├── services/
 │   ├── amadeus_flight.py          # Amadeus flight search + mock
 │   ├── amadeus_hotel.py           # Amadeus hotel search by geocode
 │   ├── amadeus_attraction.py      # Amadeus activities (kept, unused)
 │   ├── llm_itinerary_service.py   # GPT-4o-mini itinerary generation
+│   ├── llm_checker_service.py     # GPT-4o itinerary quality evaluation
 │   ├── geocoding.py               # Nominatim city → (lat, lon)
+│   ├── city_iata_resolver.py      # City name → IATA code(s) via OurAirports + geocoding fallback
+│   ├── airline_iata_resolver.py   # Airline IATA helpers
 │   ├── currency.py                # Frankfurter real-time USD rates
-│   ├── airline_iata_resolver.py   # Airline/airport IATA helpers
 │   └── booking_hotel.py
 │
 └── states/
@@ -271,4 +285,4 @@ The LLM parses the feedback into structured constraints, merges them into the se
 - This is a **reference implementation**, not production-ready. Authentication, rate limiting, and persistent storage are intentionally minimal.
 - The `amadeus_attraction.py` service is retained but not actively used — attraction planning is handled by the LLM itinerary service.
 - Hotel price filtering compares nightly price (total price ÷ rooms ÷ nights) converted to USD against the `max_price_per_night` constraint.
-- Flight search uses IATA airport codes; city names are resolved automatically where possible.
+- Flight search uses IATA airport codes. `city_iata_resolver.py` resolves city names to codes via OurAirports (filtered to `scheduled_service = yes`) with a Nominatim + haversine geocoding fallback for cities not directly matched. Non-commercial airports (military bases, private fields) are excluded regardless of their size classification.
