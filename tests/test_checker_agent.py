@@ -127,6 +127,7 @@ class CheckerAgentTests(unittest.TestCase):
         from agents.checker import checker_agent
         result = checker_agent(_base_state(retry_count=1, critique="Remove duplicate Senso-ji on Day 3."))
         self.assertEqual(result["checker_retry_count"], 2)
+        self.assertEqual(result["checker_critique"], "Still needs fixing")
         self.assertIn("attraction_agent", result["dirty_agents"])
 
     @patch("agents.checker.evaluate_itinerary")

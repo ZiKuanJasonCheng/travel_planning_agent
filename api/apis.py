@@ -81,7 +81,7 @@ def start_trip(param: RequestModel):
         "preferences": param.preferences,
         "constraints": constraints,
         "status": "planning",
-        "log_trace": False,
+        "log_trace": True,
         "dirty_agents": ["transport_agent", "accommodation_agent", "attraction_agent"],
         "traces": [],
     }
