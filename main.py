@@ -10,6 +10,8 @@ def get_application() -> FastAPI:
     async def lifespan(_app: FastAPI):
 
         yield
+        from db.connection import dispose_engine
+        dispose_engine()
 
     
     app = FastAPI(title="Trip Planning App with Agents", lifespan=lifespan)  #**settings.fastapi_kwargs
