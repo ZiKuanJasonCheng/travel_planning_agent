@@ -4,6 +4,14 @@ from sqlalchemy import text
 from db.connection import get_engine
 
 
+def _state_to_json(state: dict) -> str:
+    def _default(obj):
+        if hasattr(obj, "model_dump"):
+            return obj.model_dump(mode="json")
+        raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+    return json.dumps(state, default=_default)
+
+
 def _build_search_text(state: dict) -> str:
     parts = [
         state.get("destination") or "",
@@ -39,7 +47,7 @@ class SessionRepository:
                     "start_date": state.get("start_date"),
                     "end_date": state.get("end_date"),
                     "status": state.get("status", "planning"),
-                    "state": json.dumps(state),
+                    "state": _state_to_json(state),
                     "search_text": search_text,
                 },
             )
@@ -80,7 +88,7 @@ class SessionRepository:
                     "start_date": state.get("start_date"),
                     "end_date": state.get("end_date"),
                     "status": state.get("status", "planning"),
-                    "state": json.dumps(state),
+                    "state": _state_to_json(state),
                     "search_text": search_text,
                 },
             )
