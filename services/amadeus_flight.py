@@ -32,6 +32,30 @@ def _matches_timeslots(depart_time_str: str, timeslots: list[str]) -> bool:
         return True  # Unparseable timeslot → Don't filter
 
 
+def _parse_segment(segment: Dict[str, Any]) -> Dict[str, Any]:
+    """Parse a single Amadeus itinerary segment into a flat leg dict (no price yet)."""
+    departure = segment.get("departure", {})
+    arrival = segment.get("arrival", {})
+    depart_at = departure.get("at", "")
+    arrival_at = arrival.get("at", "")
+    return {
+        "airline": segment.get("carrierCode", ""),
+        "from": departure.get("iataCode", ""),
+        "to": arrival.get("iataCode", ""),
+        "depart_time": depart_at.split("T")[1][:8] if "T" in depart_at else "",
+        "arrival_time": arrival_at.split("T")[1][:8] if "T" in arrival_at else "",
+        "departure_date": depart_at.split("T")[0] if "T" in depart_at else "",
+    }
+
+
+def _apply_leg_prices(legs: List[Dict[str, Any]], direction_total: float) -> List[Dict[str, Any]]:
+    """Divide direction_total evenly across legs, returning new dicts with a 'price' key added."""
+    if not legs:
+        return []
+    per_leg_price = direction_total / len(legs)
+    return [{**leg, "price": int(round(per_leg_price))} for leg in legs]
+
+
 class AmadeusFlightService:
     """
     Service for querying flight information from Amadeus API
