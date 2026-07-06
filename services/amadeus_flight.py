@@ -191,7 +191,7 @@ class AmadeusFlightService:
             flights = []
             for i, offer in enumerate(response.data):
                 if i < 3:
-                    print(f"search_flights(): offer: {offer}")  # Temp                
+                    print(f"Temp: search_flights(): offer: {offer}")
                 candidate = self._parse_flight_offer(offer, outbound_preference, inbound_preference)
                 if candidate:
                     flights.append(candidate)
