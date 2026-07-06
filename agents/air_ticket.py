@@ -12,6 +12,56 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 
+def _resolve_preference(pref_dict: Optional[dict]) -> dict:
+    """Resolve a FlightPreferenceConstraint dict into a search-ready preference dict."""
+    if not pref_dict:
+        return {}
+
+    airlines = pref_dict.get("airlines")
+    excluded_airlines = pref_dict.get("excluded_airlines")
+    preferred_departure_timeslots = pref_dict.get("preferred_departure_timeslots")
+    accept_redeye_raw = pref_dict.get("accept_redeye_flights")
+    if accept_redeye_raw is None:
+        accept_redeye_flights = not bool(preferred_departure_timeslots)
+    else:
+        accept_redeye_flights = accept_redeye_raw
+
+    return {
+        "max_price_per_ticket": pref_dict.get("max_price_per_ticket"),
+        "airlines": resolve_airline_iata_codes(airlines) if airlines else None,
+        "flight_class": pref_dict.get("flight_class"),
+        "excluded_airlines": resolve_airline_iata_codes(excluded_airlines) if excluded_airlines else None,
+        "accept_redeye_flights": accept_redeye_flights,
+        "direct_flights_only": pref_dict.get("direct_flights_only", False),
+        "preferred_departure_timeslots": preferred_departure_timeslots,
+    }
+
+
+def _search_mode(state: TripState, transport_constraints: dict) -> str:
+    """Decide how much of the flight search to (re)run this pass.
+
+    Returns one of "full", "outbound_only", "inbound_only", "both_one_way", "none".
+    """
+    feedback = state.get("feedback")
+    rerun_planning = transport_constraints.get("rerun_planning")
+
+    if feedback is None or rerun_planning is True:
+        return "full"
+
+    last_feedback = state.get("last_feedback_constraints") or {}
+    last_transport = last_feedback.get("transport") or {}
+    wants_outbound = "outbound_air_ticket_preference" in last_transport
+    wants_inbound = "inbound_air_ticket_preference" in last_transport
+
+    if wants_outbound and wants_inbound:
+        return "both_one_way"
+    if wants_outbound:
+        return "outbound_only"
+    if wants_inbound:
+        return "inbound_only"
+    return "none"
+
+
 def air_ticket_agent(state: TripState) -> TripState:
     """
     Sub-agent for searching and recommending air ticket options
