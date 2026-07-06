@@ -3,6 +3,10 @@ from states.constraints import Constraints
 from orchestration.tracability import DecisionTrace
 
 
+def default_transport_options() -> dict:
+    return {"railway": [], "flight": {"outbound": [], "inbound": []}}
+
+
 class TripState(TypedDict, total=False):
     session_id: Optional[str]
     destination: str
@@ -14,12 +18,13 @@ class TripState(TypedDict, total=False):
     sub_destinations: List[str]
     preferences: List[str]
 
-    transport_options: List[dict]
+    transport_options: dict   # {"railway": list[dict], "flight": {"outbound": list[dict], "inbound": list[dict]}}
     accommodation_options: List[dict]
     itinerary: List[dict]
 
     feedback: Optional[str]
     constraints: Constraints
+    last_feedback_constraints: Optional[dict]  # this round's parsed (pre-merge) constraints
 
     #rerun_target: Optional[str]
     log_trace: bool
