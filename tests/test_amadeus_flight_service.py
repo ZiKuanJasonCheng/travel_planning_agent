@@ -1,6 +1,7 @@
 import unittest
+from unittest.mock import MagicMock
 
-from services.amadeus_flight import _parse_segment, _apply_leg_prices
+from services.amadeus_flight import _parse_segment, _apply_leg_prices, _passes_preference, _cache_key
 
 
 class ParseSegmentTests(unittest.TestCase):
@@ -39,6 +40,149 @@ class ApplyLegPricesTests(unittest.TestCase):
         legs = [{"airline": "CX"}]
         _apply_leg_prices(legs, 500.0)
         self.assertNotIn("price", legs[0])
+
+
+class PassesPreferenceTests(unittest.TestCase):
+    def _legs(self, airline="CX", depart_time="10:00:00", price=200, count=1):
+        return [{"airline": airline, "depart_time": depart_time, "price": price} for _ in range(count)]
+
+    def test_no_preference_always_passes(self):
+        self.assertTrue(_passes_preference(self._legs(), None))
+
+    def test_excluded_airline_fails(self):
+        pref = {"excluded_airlines": ["CX"]}
+        self.assertFalse(_passes_preference(self._legs(airline="CX"), pref))
+
+    def test_preferred_airline_whitelist_fails_when_not_matched(self):
+        pref = {"airlines": ["UO"]}
+        self.assertFalse(_passes_preference(self._legs(airline="CX"), pref))
+
+    def test_direct_flights_only_fails_for_multi_leg(self):
+        pref = {"direct_flights_only": True}
+        self.assertFalse(_passes_preference(self._legs(count=2), pref))
+
+    def test_direct_flights_only_passes_for_single_leg(self):
+        pref = {"direct_flights_only": True}
+        self.assertTrue(_passes_preference(self._legs(count=1), pref))
+
+    def test_redeye_rejected_when_not_accepted(self):
+        pref = {"accept_redeye_flights": False}
+        self.assertFalse(_passes_preference(self._legs(depart_time="00:30:00"), pref))
+
+    def test_max_price_per_ticket_fails_when_over_budget(self):
+        pref = {"max_price_per_ticket": 100}
+        self.assertFalse(_passes_preference(self._legs(price=200), pref))
+
+    def test_max_price_per_ticket_passes_when_within_budget(self):
+        pref = {"max_price_per_ticket": 300}
+        self.assertTrue(_passes_preference(self._legs(price=200), pref))
+
+
+class CacheKeyTests(unittest.TestCase):
+    def test_same_args_produce_same_key(self):
+        key1 = _cache_key(origin="HKG", destination="KIX", outbound_preference={"airlines": ["CX"]})
+        key2 = _cache_key(origin="HKG", destination="KIX", outbound_preference={"airlines": ["CX"]})
+        self.assertEqual(key1, key2)
+
+    def test_different_args_produce_different_keys(self):
+        key1 = _cache_key(origin="HKG", destination="KIX")
+        key2 = _cache_key(origin="HKG", destination="NRT")
+        self.assertNotEqual(key1, key2)
+
+
+class SearchFlightsTests(unittest.TestCase):
+    def _round_trip_offer(self):
+        return {
+            "itineraries": [
+                {"segments": [
+                    {"departure": {"iataCode": "HKG", "at": "2026-09-10T17:30:00"},
+                     "arrival": {"iataCode": "KIX", "at": "2026-09-10T22:00:00"},
+                     "carrierCode": "CX"},
+                ]},
+                {"segments": [
+                    {"departure": {"iataCode": "KIX", "at": "2026-09-16T21:45:00"},
+                     "arrival": {"iataCode": "HKG", "at": "2026-09-17T01:00:00"},
+                     "carrierCode": "CX"},
+                ]},
+            ],
+            "price": {"currency": "USD", "total": "600.00"},
+        }
+
+    def test_search_flights_returns_split_candidate_and_caches_result(self):
+        from services.amadeus_flight import AmadeusFlightService
+
+        service = AmadeusFlightService.__new__(AmadeusFlightService)
+        service.use_mock = False
+        service._cache = {}
+        service._cache_ttl_seconds = 900
+        mock_response = type("R", (), {"data": [self._round_trip_offer()]})()
+        service.client = type("C", (), {
+            "shopping": type("S", (), {
+                "flight_offers_search": type("F", (), {"get": lambda self, **kw: mock_response})()
+            })()
+        })()
+
+        result = service.search_flights(
+            origin="HKG", destination="KIX",
+            departure_date="2026-09-10", return_date="2026-09-16",
+        )
+
+        self.assertEqual(len(result), 1)
+        candidate = result[0]
+        self.assertEqual(candidate["price"], 600)
+        self.assertEqual(candidate["outbound_legs"][0]["price"], 300)
+        self.assertEqual(candidate["inbound_legs"][0]["price"], 300)
+        self.assertEqual(candidate["stops_outbound"], 0)
+        self.assertEqual(candidate["stops_inbound"], 0)
+
+        # Cache populated
+        self.assertEqual(len(service._cache), 1)
+
+    def test_response_error_returns_amadeus_error_reason(self):
+        from services.amadeus_flight import AmadeusFlightService
+        from amadeus import ResponseError
+
+        service = AmadeusFlightService.__new__(AmadeusFlightService)
+        service.use_mock = False
+        service._cache = {}
+        service._cache_ttl_seconds = 900
+
+        def _raise(**kw):
+            raise ResponseError(MagicMockResponse())
+
+        class MagicMockResponse:
+            status_code = 500
+            result = None
+            parsed = False
+
+        service.client = type("C", (), {
+            "shopping": type("S", (), {
+                "flight_offers_search": type("F", (), {"get": lambda self, **kw: _raise(**kw)})()
+            })()
+        })()
+
+        result = service.search_flights(origin="HKG", destination="KIX", departure_date="2026-09-10")
+        self.assertEqual(result, [{"type": "flight", "reason": "Amadeus API error"}])
+
+    def test_unexpected_error_returns_unknown_error_reason(self):
+        from services.amadeus_flight import AmadeusFlightService
+
+        service = AmadeusFlightService.__new__(AmadeusFlightService)
+        service.use_mock = False
+        service._cache = {}
+        service._cache_ttl_seconds = 900
+
+        def _raise(**kw):
+            raise ValueError("boom")
+
+        service.client = type("C", (), {
+            "shopping": type("S", (), {
+                "flight_offers_search": type("F", (), {"get": lambda self, **kw: _raise(**kw)})()
+            })()
+        })()
+
+        result = service.search_flights(origin="HKG", destination="KIX", departure_date="2026-09-10")
+        self.assertEqual(result, [{"type": "flight", "reason": "Unknown error"}])
 
 
 if __name__ == "__main__":

@@ -2,7 +2,9 @@
 Amadeus Flight API Service
 Wrapper for Amadeus flight search functionality
 """
+import json
 import os
+import time
 from typing import Optional, List, Dict, Any
 from amadeus import Client, ResponseError
 
@@ -56,18 +58,65 @@ def _apply_leg_prices(legs: List[Dict[str, Any]], direction_total: float) -> Lis
     return [{**leg, "price": int(round(per_leg_price))} for leg in legs]
 
 
+_ERROR_REASONS = {"Amadeus API error", "Unknown error"}
+
+
+def _passes_preference(legs: List[Dict[str, Any]], preference: Optional[Dict[str, Any]]) -> bool:
+    """Check a direction's legs (already priced) against its preference constraints."""
+    if not legs:
+        return False
+    if not preference:
+        return True
+
+    first_leg = legs[0]
+    airline_code = first_leg.get("airline", "")
+    depart_time = first_leg.get("depart_time", "")
+
+    excluded_airlines = preference.get("excluded_airlines")
+    if excluded_airlines and airline_code in excluded_airlines:
+        return False
+
+    airlines = preference.get("airlines")
+    if airlines and airline_code not in airlines:
+        return False
+
+    if preference.get("direct_flights_only") and len(legs) > 1:
+        return False
+
+    if not preference.get("accept_redeye_flights", True) and depart_time and _is_redeye(depart_time):
+        return False
+
+    preferred_departure_timeslots = preference.get("preferred_departure_timeslots")
+    if preferred_departure_timeslots and depart_time and not _matches_timeslots(depart_time, preferred_departure_timeslots):
+        return False
+
+    max_price_per_ticket = preference.get("max_price_per_ticket")
+    if max_price_per_ticket is not None:
+        direction_total_price = sum(leg.get("price", 0) for leg in legs)
+        if direction_total_price > max_price_per_ticket:
+            return False
+
+    return True
+
+
+def _cache_key(**kwargs) -> str:
+    return json.dumps(kwargs, sort_keys=True, default=str)
+
+
 class AmadeusFlightService:
     """
     Service for querying flight information from Amadeus API
     """
-    
+
+    _CACHE_TTL_SECONDS = 900  # 15 minutes
+
     def __init__(self):
-        """
-        Initialize Amadeus client with API credentials from environment variables
-        """
         client_id = os.getenv("AMADEUS_CLIENT_ID")
         client_secret = os.getenv("AMADEUS_CLIENT_SECRET")
-        
+
+        self._cache: Dict[str, Any] = {}
+        self._cache_ttl_seconds = self._CACHE_TTL_SECONDS
+
         if not client_id or not client_secret:
             # Use test credentials if not provided (for development)
             # Note: These are test credentials and may have limited functionality
@@ -75,12 +124,9 @@ class AmadeusFlightService:
             self.use_mock = True
             print("Warning: AMADEUS_CLIENT_ID and AMADEUS_CLIENT_SECRET not set. Using mock data.")
         else:
-            self.client = Client(
-                client_id=client_id,
-                client_secret=client_secret
-            )
+            self.client = Client(client_id=client_id, client_secret=client_secret)
             self.use_mock = False
-    
+
     def search_flights(
         self,
         origin: str,
@@ -88,42 +134,40 @@ class AmadeusFlightService:
         departure_date: str,
         return_date: Optional[str] = None,
         adults: int = 1,
-        max_price: Optional[int] = None,
-        preferred_airlines: Optional[List[str]] = None,
-        flight_class: Optional[str] = None,
-        excluded_airlines: Optional[List[str]] = None,
-        accept_redeye_flights: bool = True,
-        direct_flights_only: bool = False,
-        preferred_departure_timeslots: Optional[List[str]] = None,
+        outbound_preference: Optional[Dict[str, Any]] = None,
+        inbound_preference: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Search for flights using Amadeus API
-        
-        Args:
-            origin: Origin airport code (e.g., "NYC", "JFK")
-            destination: Destination airport code (e.g., "NRT", "TYO")
-            departure_date: Departure date in YYYY-MM-DD format
-            return_date: Return date in YYYY-MM-DD format (optional for one-way)
-            adults: Number of adult passengers (default: 1)
-            max_price: Maximum price filter (optional)
-            preferred_airlines: List of preferred airline codes (optional)
-            flight_class: Preferred flight class (e.g., "ECONOMY", "BUSINESS")
-            excluded_airlines: List of airline codes to exclude
-            accept_redeye_flights: Whether to accept red-eye flights (departure time to be from 23:30 to 23:59 or 0:00 to 5:29 on departure date)
-            direct_flights_only: Whether to only accepts direct flights (default: False)
-            preferred_departure_timeslots: List of preferred departure time slots in HH:MM~HH:MM format for flights
-        Returns:
-            List of flight options with details
-        """
+        Search for flights using Amadeus API.
 
-        print(f"search_flights(): use_mock: {self.use_mock}")
-        print(f"search_flights(): preferred_airlines: {preferred_airlines}, excluded_airlines: {excluded_airlines}")
+        Args:
+            origin: Origin airport code
+            destination: Destination airport code
+            departure_date: Departure date in YYYY-MM-DD format
+            return_date: Return date in YYYY-MM-DD format (round-trip) or None (one-way)
+            adults: Number of adult passengers
+            outbound_preference: Preference dict applied to the outbound leg (see module docstring)
+            inbound_preference: Preference dict applied to the inbound leg; ignored when return_date is None
+        Returns:
+            List of candidate dicts: {price, currency, outbound_legs, inbound_legs, stops_outbound,
+            stops_inbound, reason}, or a single-item error list on failure.
+        """
+        cache_key = _cache_key(
+            origin=origin, destination=destination, departure_date=departure_date,
+            return_date=return_date, adults=adults,
+            outbound_preference=outbound_preference, inbound_preference=inbound_preference,
+        )
+        cached = self._cache.get(cache_key)
+        if cached and (time.time() - cached[0]) < self._cache_ttl_seconds:
+            return cached[1]
+
         if self.use_mock:
-            return self._mock_flight_search(
+            result = self._mock_flight_search(
                 origin, destination, departure_date, return_date,
-                max_price, preferred_airlines, excluded_airlines,
-                accept_redeye_flights, direct_flights_only, preferred_departure_timeslots,
+                outbound_preference, inbound_preference,
             )
+            self._cache[cache_key] = (time.time(), result)
+            return result
 
         try:
             # Build search parameters
@@ -135,155 +179,93 @@ class AmadeusFlightService:
             }
             if return_date:
                 search_params["returnDate"] = return_date
-            if max_price:
-                search_params["maxPrice"] = max_price
-            if flight_class:
-                search_params["travelClass"] = flight_class.upper()
 
-            print(f"search_flights(): search_params: {search_params}")
+            outbound_class = (outbound_preference or {}).get("flight_class")
+            inbound_class = (inbound_preference or {}).get("flight_class")
+            if outbound_class and (not inbound_class or outbound_class == inbound_class):
+                search_params["travelClass"] = outbound_class.upper()
+            elif inbound_class and not outbound_class:
+                search_params["travelClass"] = inbound_class.upper()
+            # If both are set and differ, omit travelClass — a single request can't express two cabins.
 
-            # Search for flight offers
             response = self.client.shopping.flight_offers_search.get(**search_params)
             print(f"search_flights(): len(response.data): {len(response.data)}")
 
             flights = []
-            skipped_counts = {
-                "is_excluded_airlines": 0,
-                "not_preferred_airlines": 0,
-                "not_direct_flights": 0,
-                "is_redeye_flights": 0,
-                "not_in_preferred_departure_timeslots": 0
-            }
             for i, offer in enumerate(response.data):
                 if i < 3:
-                    print(f"search_flights(): offer: {offer}")  # Temp
-                # Parse and format results
-                flight_option = self._parse_flight_offer(
-                    offer,
-                    preferred_airlines=preferred_airlines,
-                    excluded_airlines=excluded_airlines,
-                    accept_redeye_flights=accept_redeye_flights,
-                    direct_flights_only=direct_flights_only,
-                    preferred_departure_timeslots=preferred_departure_timeslots,
-                    skipped_counts=skipped_counts
-                )
-                if flight_option:
-                    flights.append(flight_option)
-            
+                    print(f"search_flights(): offer: {offer}")  # Temp                
+                candidate = self._parse_flight_offer(offer, outbound_preference, inbound_preference)
+                if candidate:
+                    flights.append(candidate)
+
             # Sort by price
             flights.sort(key=lambda x: x.get("price", float("inf")))
-            # Sort by arrival time from earliet to latest
-            # ...
-
-            return flights[:10]
+            result = flights[:10]
+            self._cache[cache_key] = (time.time(), result)
+            return result
 
         except ResponseError as error:
             print(f"Amadeus API Error: {error}")
             print(f"End of message of Amadeus API Error")
-            return self._mock_flight_search(
-                origin, destination, departure_date, return_date,
-                max_price, preferred_airlines, excluded_airlines,
-                accept_redeye_flights, direct_flights_only, preferred_departure_timeslots,
-            )
+            return [{"type": "flight", "reason": "Amadeus API error"}]
         except Exception as e:
             print(f"Error searching flights: {e}")
-            return self._mock_flight_search(
-                origin, destination, departure_date, return_date,
-                max_price, preferred_airlines, excluded_airlines,
-                accept_redeye_flights, direct_flights_only, preferred_departure_timeslots,
-            )
-    
+            return [{"type": "flight", "reason": "Unknown error"}]
+
     def _parse_flight_offer(
         self,
         offer: Dict[str, Any],
-        preferred_airlines: Optional[List[str]] = None,
-        excluded_airlines: Optional[List[str]] = None,
-        accept_redeye_flights: bool = True,
-        direct_flights_only: bool = False,
-        preferred_departure_timeslots: Optional[List[str]] = None,
-        skipped_counts: Dict[str, Any] = {}
+        outbound_preference: Optional[Dict[str, Any]] = None,
+        inbound_preference: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
-        """
-        Parse Amadeus flight offer into our standard format
-        """
+        """Parse an Amadeus flight offer into a candidate dict with per-leg detail and pricing."""
         try:
             itineraries = offer.get("itineraries", [])
             if not itineraries:
                 return None
 
-            # Get first itinerary (outbound)
-            outbound = itineraries[0]
-            segments = outbound.get("segments", [])
-            if not segments:
+            outbound_segments = itineraries[0].get("segments", [])
+            if not outbound_segments:
                 return None
+            outbound_legs_raw = [_parse_segment(s) for s in outbound_segments]
 
-            # Extract outbound flight details
-            first_segment = segments[0]
-            last_segment = segments[-1]
-
-            airline_code = first_segment.get("carrierCode", "")
-            departure_time = first_segment.get("departure", {}).get("at", "")
-            arrival_time = last_segment.get("arrival", {}).get("at", "")
-
-            # Filter: excluded airlines
-            if excluded_airlines and airline_code in excluded_airlines:
-                skipped_counts["is_excluded_airlines"] = excluded_airlines.get("is_excluded_airlines", 0) + 1
-                return None
-
-            # Filter: preferred airlines whitelist
-            if preferred_airlines and airline_code not in preferred_airlines:
-                skipped_counts["not_preferred_airlines"] = excluded_airlines.get("not_preferred_airlines", 0) + 1
-                return None
-
-            # Filter: direct flights
-            stops = len(segments) - 1
-            if direct_flights_only and stops > 0:
-                skipped_counts["not_direct_flights"] = excluded_airlines.get("not_direct_flights", 0) + 1
-                return None
-
-            # Filter: red-eye
-            depart_time = departure_time.split("T")[1][:8] if "T" in departure_time else ""
-            if not accept_redeye_flights and depart_time and _is_redeye(depart_time):
-                skipped_counts["is_redeye_flights"] = excluded_airlines.get("is_redeye_flights", 0) + 1
-                return None
-
-            # Filter: preferred departure timeslots
-            if preferred_departure_timeslots and depart_time and not _matches_timeslots(depart_time, preferred_departure_timeslots):
-                skipped_counts["not_in_preferred_departure_timeslots"] = excluded_airlines.get("not_in_preferred_departure_timeslots", 0) + 1
-                return None
+            inbound_legs_raw = None
+            if len(itineraries) > 1:
+                inbound_segments = itineraries[1].get("segments", [])
+                if inbound_segments:
+                    inbound_legs_raw = [_parse_segment(s) for s in inbound_segments]
 
             price_data = offer.get("price", {})
             total_price = float(price_data.get("total", 0))
             currency = price_data.get("currency", "USD")
 
-            # Format arrival times
-            arrival_time_formatted = arrival_time.split("T")[1][:8] if "T" in arrival_time else ""
+            if inbound_legs_raw:
+                outbound_total, inbound_total = total_price / 2, total_price / 2
+            else:
+                outbound_total, inbound_total = total_price, None
 
-            # Extract return leg departure time if this is a round-trip offer
-            return_depart_time = ""
-            if len(itineraries) > 1:
-                return_segments = itineraries[1].get("segments", [])
-                if return_segments:
-                    return_dep_at = return_segments[0].get("departure", {}).get("at", "")
-                    return_depart_time = return_dep_at.split("T")[1][:8] if "T" in return_dep_at else ""
+            outbound_legs = _apply_leg_prices(outbound_legs_raw, outbound_total)
+            inbound_legs = _apply_leg_prices(inbound_legs_raw, inbound_total) if inbound_legs_raw else None
+
+            if not _passes_preference(outbound_legs, outbound_preference):
+                return None
+            if inbound_legs is not None and not _passes_preference(inbound_legs, inbound_preference):
+                return None
 
             return {
-                "type": "flight",
-                "to": last_segment.get("arrival", {}).get("iataCode", ""),
-                "airline": airline_code,
                 "price": int(total_price),
                 "currency": currency,
-                "depart_time": depart_time,
-                "arrival_time": arrival_time_formatted,
-                "departure_date": departure_time.split("T")[0] if "T" in departure_time else "",
-                "return_depart_time": return_depart_time,
-                "stops": stops,
+                "outbound_legs": outbound_legs,
+                "inbound_legs": inbound_legs,
+                "stops_outbound": len(outbound_legs) - 1,
+                "stops_inbound": (len(inbound_legs) - 1) if inbound_legs else None,
                 "reason": "Amadeus API result",
             }
         except Exception as e:
             print(f"Error parsing flight offer: {e}")
             return None
-    
+
     def _mock_flight_search(
         self,
         origin: str,
