@@ -9,6 +9,9 @@ _NOMINATIM_HEADERS = {"User-Agent": "travel-planning-agent/1.0"}
 # OSM type values that are clearly too coarse
 _REJECTED_TYPES = {"country", "state", "province", "region", "continent", "state_district"}
 
+# Exceptions: some places are considered to be a city in general but their OSM types are not city
+EXCEPTION_PLACES = {"hong kong", "hk"}
+
 # Nominatim place_rank = admin_level * 2 -> Not exactly correct. There are exceptions
 # country: admin_level 2 → place_rank 4
 # state/province: admin_level 4 → place_rank 8
@@ -52,7 +55,7 @@ def check_city_granularity(name: str) -> None:
     place_type = result.get("addresstype", "")
     place_rank_raw = result.get("place_rank")
 
-    if place_type in _REJECTED_TYPES:
+    if place_type in _REJECTED_TYPES and name.lower() not in EXCEPTION_PLACES:
         raise ValueError(
             f"'{name}' is a {place_type}. Please provide a specific city or county."
         )

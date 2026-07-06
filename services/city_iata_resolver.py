@@ -5,8 +5,8 @@ import math
 import urllib.request
 from typing import Optional
 
-#from services.geocoding import fetch_coordinates
-from geocoding import fetch_coordinates  # Temp
+from services.geocoding import fetch_coordinates
+#from geocoding import fetch_coordinates  # Temp
 
 
 _NEAREST_AIRPORT_RADIUS_KM = 300

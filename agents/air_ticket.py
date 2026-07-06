@@ -4,7 +4,7 @@ Uses Amadeus API to search for real flight options
 """
 from states.trip_state import TripState
 from orchestration.tracability import log_trace
-from services.amadeus_flight import get_flight_service
+from services.amadeus_flight import AmadeusFlightService, get_flight_service
 from services.airline_iata_resolver import resolve_airline_iata_codes
 from services.city_iata_resolver import resolve_city_iata_codes
 from copy import deepcopy
@@ -34,18 +34,34 @@ def air_ticket_agent(state: TripState) -> TripState:
     max_price = None
     preferred_airlines = None
     flight_class = None
-    
+    excluded_airlines = None
+    accept_redeye_flights = True
+    direct_flights_only = False
+    preferred_departure_timeslots = None
+
     if "budget" in constraints and constraints["budget"]:
         max_price = constraints["budget"].get("max_price_per_ticket")
-    
+
     if "preference" in constraints and constraints["preference"]:
-        preferred_airlines = constraints["preference"].get("airlines")
-        flight_class = constraints["preference"].get("flight_class")
+        pref = constraints["preference"]
+        preferred_airlines = pref.get("airlines")
+        flight_class = pref.get("flight_class")
+        excluded_airlines = pref.get("excluded_airlines")
+        direct_flights_only = pref.get("direct_flights_only", False)
+        preferred_departure_timeslots = pref.get("preferred_departure_timeslots")
+        accept_redeye_raw = pref.get("accept_redeye_flights")  # None if not explicitly set
+        if accept_redeye_raw is None:
+            # Auto-reject red-eye when user specified preferred timeslots
+            accept_redeye_flights = not bool(preferred_departure_timeslots)
+        else:
+            accept_redeye_flights = accept_redeye_raw
 
     if preferred_airlines:
         preferred_airlines = resolve_airline_iata_codes(preferred_airlines)
+    if excluded_airlines:
+        excluded_airlines = resolve_airline_iata_codes(excluded_airlines)
 
-    origin = state.get("origin") or _infer_origin(state)
+    origin = state.get("origin")  #or _infer_origin(state)
     num_people = state.get("num_people") or 1
 
     # Calculate dates
@@ -63,6 +79,8 @@ def air_ticket_agent(state: TripState) -> TripState:
             flight_service, origin_codes, dest_codes,
             departure_date, return_date, num_people,
             max_price, preferred_airlines, flight_class,
+            excluded_airlines, accept_redeye_flights, direct_flights_only,
+            preferred_departure_timeslots,
         )
 
         if not flight_options and return_date:
@@ -77,13 +95,14 @@ def air_ticket_agent(state: TripState) -> TripState:
                 max_price=max_price,
                 preferred_airlines=preferred_airlines,
                 flight_class=flight_class,
+                excluded_airlines=excluded_airlines,
+                accept_redeye_flights=accept_redeye_flights,
+                direct_flights_only=direct_flights_only,
+                preferred_departure_timeslots=preferred_departure_timeslots,
             )
-            selected_flights = (
-                _select_best_flights(outbound_options, max_price, preferred_airlines) +
-                _select_best_flights(inbound_options, max_price, preferred_airlines)
-            )
+            selected_flights = outbound_options[:3] + inbound_options[:3]
         elif flight_options:
-            selected_flights = _select_best_flights(flight_options, max_price, preferred_airlines)
+            selected_flights = flight_options[:3]
         else:
             selected_flights = []
 
@@ -155,7 +174,7 @@ def _calculate_return_date(state: TripState, days: int) -> Optional[str]:
 
 
 def _search_all_combos(
-    flight_service,
+    flight_service: AmadeusFlightService,
     origin_codes: list[str],
     dest_codes: list[str],
     departure_date: str,
@@ -164,6 +183,10 @@ def _search_all_combos(
     max_price: Optional[int],
     preferred_airlines: Optional[list],
     flight_class: Optional[str],
+    excluded_airlines: Optional[list] = None,
+    accept_redeye_flights: bool = True,
+    direct_flights_only: bool = False,
+    preferred_departure_timeslots: Optional[list] = None,
 ) -> list:
     """Search every origin×destination code combination and return combined results."""
     results = []
@@ -178,12 +201,16 @@ def _search_all_combos(
                 max_price=max_price,
                 preferred_airlines=preferred_airlines,
                 flight_class=flight_class,
+                excluded_airlines=excluded_airlines,
+                accept_redeye_flights=accept_redeye_flights,
+                direct_flights_only=direct_flights_only,
+                preferred_departure_timeslots=preferred_departure_timeslots,
             ))
     return results
 
 
 def _search_one_way_pair(
-    flight_service,
+    flight_service: AmadeusFlightService,
     origin_codes: list[str],
     dest_codes: list[str],
     departure_date: str,
@@ -192,38 +219,25 @@ def _search_one_way_pair(
     max_price: Optional[int],
     preferred_airlines: Optional[list],
     flight_class: Optional[str],
+    excluded_airlines: Optional[list] = None,
+    accept_redeye_flights: bool = True,
+    direct_flights_only: bool = False,
+    preferred_departure_timeslots: Optional[list] = None,
 ) -> tuple[list, list]:
     """Search outbound and inbound as separate one-way tickets; return (outbound, inbound)."""
     outbound = _search_all_combos(
         flight_service, origin_codes, dest_codes, departure_date, None,
         adults, max_price, preferred_airlines, flight_class,
+        excluded_airlines, accept_redeye_flights, direct_flights_only,
+        preferred_departure_timeslots,
     )
     inbound = _search_all_combos(
         flight_service, dest_codes, origin_codes, return_date, None,
         adults, max_price, preferred_airlines, flight_class,
+        excluded_airlines, accept_redeye_flights, direct_flights_only,
+        preferred_departure_timeslots,
     )
     return outbound, inbound
-
-
-def _select_best_flights(
-    flight_options: list,
-    max_price: Optional[int],
-    preferred_airlines: Optional[list]
-) -> list:
-    """
-    Select the best flight options from search results
-    """
-    if not flight_options:
-        return []
-    
-    # If we have preferred airlines, prioritize those
-    if preferred_airlines:
-        preferred = [flight for flight in flight_options if flight.get("airline") in preferred_airlines]
-        if preferred:
-            return preferred[:3]  # Return top 3 preferred
-    
-    # Otherwise, return top 3 cheapest options
-    return flight_options[:3]
 
 
 def _build_fallback_flight_options(

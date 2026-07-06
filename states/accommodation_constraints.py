@@ -1,4 +1,4 @@
-from typing import TypedDict, List, Optional, Literal
+from typing import Optional
 from pydantic import BaseModel, Field
 
 class BudgetConstraint(BaseModel):
@@ -8,6 +8,7 @@ class BudgetConstraint(BaseModel):
 class PreferenceConstraint(BaseModel):
     area: Optional[str] = Field(None, description="Preferred area or location in a city/region")
     hotel_style: Optional[str] = Field(None, description="Hotel style or type")
+    exclusions: Optional[list[str]] = Field(None, description="Hotel types, areas, or amenities to exclude e.g. hostel, shared bathroom, far from city center, etc.")
 
 
 

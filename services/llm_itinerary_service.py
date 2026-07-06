@@ -49,17 +49,22 @@ def _build_context_lines(
     arrival_time: Optional[str],
     start_date: Optional[str],
     styles: Optional[list[str]],
+    exclusions: Optional[list[str]],
     must_go_places: Optional[list[str]],
     max_price_per_ticket: Optional[float],
     num_people: int = 1,
     origin: Optional[str] = None,
     return_depart_time: Optional[str] = None,
+    hotel_lat: Optional[float] = None,
+    hotel_lon: Optional[float] = None,
 ) -> str:
     parts = [f"Destination: {destination}", f"Trip duration: {days} day(s)", f"Number of travelers: {num_people}"]
     if origin:
         parts.append(f"Departing from: {origin}")
     if hotel_area:
         parts.append(f"Hotel location: {hotel_area}")
+    if hotel_lat is not None and hotel_lon is not None:
+        parts.append(f"Hotel coordinates: ({hotel_lat:.5f}, {hotel_lon:.5f})")
     if start_date:
         parts.append(f"Start date: {start_date}")
     if arrival_time:
@@ -68,6 +73,8 @@ def _build_context_lines(
         parts.append(f"Return flight departure time on day {days}: {return_depart_time}")
     if styles:
         parts.append(f"Travel styles: {', '.join(styles)}")
+    if exclusions:
+        parts.append(f"Exclusions (DO NOT include these): {', '.join(exclusions)}")
     if must_go_places:
         parts.append(f"Must-visit places: {', '.join(must_go_places)}")
     if max_price_per_ticket is not None:
@@ -113,20 +120,24 @@ class LLMItineraryService:
         arrival_time: Optional[str] = None,
         start_date: Optional[str] = None,
         styles: Optional[list[str]] = None,
+        exclusions: Optional[list[str]] = None,
         must_go_places: Optional[list[str]] = None,
         max_price_per_ticket: Optional[float] = None,
         num_people: int = 1,
         origin: Optional[str] = None,
         return_depart_time: Optional[str] = None,
         critique: Optional[str] = None,
+        hotel_lat: Optional[float] = None,
+        hotel_lon: Optional[float] = None,
     ) -> list[dict]:
         if not self.client:
             return []
 
         context = _build_context_lines(
             destination, days, hotel_area, arrival_time, start_date,
-            styles, must_go_places, max_price_per_ticket,
+            styles, exclusions, must_go_places, max_price_per_ticket,
             num_people=num_people, origin=origin, return_depart_time=return_depart_time,
+            hotel_lat=hotel_lat, hotel_lon=hotel_lon,
         )
         flight_rules = _day_rules(arrival_time, return_depart_time, days)
 
@@ -156,12 +167,15 @@ Respond ONLY with valid JSON matching this structure:
         hotel_area: Optional[str] = None,
         arrival_time: Optional[str] = None,
         styles: Optional[list[str]] = None,
+        exclusions: Optional[list[str]] = None,
         must_go_places: Optional[list[str]] = None,
         max_price_per_ticket: Optional[float] = None,
         num_people: int = 1,
         origin: Optional[str] = None,
         return_depart_time: Optional[str] = None,
         critique: Optional[str] = None,
+        hotel_lat: Optional[float] = None,
+        hotel_lon: Optional[float] = None,
     ) -> list[dict]:
         if not self.client:
             return []
@@ -184,8 +198,9 @@ Respond ONLY with valid JSON matching this structure:
 
         context = _build_context_lines(
             destination, days, hotel_area, arrival_time, None,
-            styles, must_go_places, max_price_per_ticket,
+            styles, exclusions, must_go_places, max_price_per_ticket,
             num_people=num_people, origin=origin, return_depart_time=return_depart_time,
+            hotel_lat=hotel_lat, hotel_lon=hotel_lon,
         )
         flight_rules = _day_rules(arrival_time, return_depart_time, days)
 

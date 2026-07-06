@@ -19,18 +19,22 @@ def attraction_agent(state: TripState) -> TripState:
     arrival_time = transport.get("arrival_time")
     return_depart_time = transport.get("return_depart_time")
     hotel_area = hotel.get("area")
+    hotel_lat = hotel.get("lat")
+    hotel_lon = hotel.get("lon")
 
     # Step 2: Extract constraints
     max_price_per_ticket = None
     styles = None
     must_go_places = None
+    exclusions = None
 
     if constraints.get("budget"):
         max_price_per_ticket = constraints["budget"].get("max_price_per_ticket")
     if constraints.get("preference"):
         styles = constraints["preference"].get("styles")
         must_go_places = constraints["preference"].get("must_go_places")
-    print(f"attraction_agent(): max_price_per_ticket: {max_price_per_ticket}, styles: {styles}, must_go_places: {must_go_places}")
+        exclusions = constraints["preference"].get("exclusions")
+    print(f"attraction_agent(): max_price_per_ticket: {max_price_per_ticket}, styles: {styles}, must_go_places: {must_go_places}, exclusions: {exclusions}")
 
     # Step 3: log_trace at entry
     if state.get("log_trace"):
@@ -55,12 +59,15 @@ def attraction_agent(state: TripState) -> TripState:
                 hotel_area=hotel_area,
                 arrival_time=arrival_time,
                 styles=styles,
+                exclusions=exclusions,
                 must_go_places=must_go_places,
                 max_price_per_ticket=max_price_per_ticket,
                 num_people=num_people,
                 origin=origin,
                 return_depart_time=return_depart_time,
                 critique=checker_critique,
+                hotel_lat=hotel_lat,
+                hotel_lon=hotel_lon,
             )
         else:
             itinerary = llm_service.generate_itinerary(
@@ -70,19 +77,22 @@ def attraction_agent(state: TripState) -> TripState:
                 arrival_time=arrival_time,
                 start_date=start_date,
                 styles=styles,
+                exclusions=exclusions,
                 must_go_places=must_go_places,
                 max_price_per_ticket=max_price_per_ticket,
                 num_people=num_people,
                 origin=origin,
                 return_depart_time=return_depart_time,
                 critique=checker_critique,
+                hotel_lat=hotel_lat,
+                hotel_lon=hotel_lon,
             )
 
         if not itinerary:
-            itinerary = _build_fallback_itinerary(destination, days, hotel_area)
+            itinerary = _build_fallback_itinerary(destination, days, hotel_area, hotel_lat, hotel_lon)
     except Exception as e:
         print(f"attraction_agent(): unexpected error: {e}")
-        itinerary = _build_fallback_itinerary(destination, days, hotel_area)
+        itinerary = _build_fallback_itinerary(destination, days, hotel_area, hotel_lat, hotel_lon)
 
     # Step 5: log_trace at exit
     if state.get("log_trace"):
@@ -101,7 +111,11 @@ def attraction_agent(state: TripState) -> TripState:
 
 
 def _build_fallback_itinerary(
-    destination: str, days: int, hotel_area: str | None
+    destination: str,
+    days: int,
+    hotel_area: str | None,
+    hotel_lat: float | None = None,
+    hotel_lon: float | None = None,
 ) -> list[dict]:
     """Static fallback when the LLM service is unavailable."""
     area = hotel_area or destination

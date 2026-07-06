@@ -80,6 +80,7 @@ class AmadeusHotelService:
             print(f"Unexpected Amadeus hotel error: {error}")
             return []
 
+
     def _fetch_offers_resilient(
         self, hotel_ids: List[str], base_params: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
@@ -132,7 +133,10 @@ class AmadeusHotelService:
         nights = max(1, (date.fromisoformat(check_out) - date.fromisoformat(check_in)).days)
         hotels: List[Dict[str, Any]] = []
 
-        for item in data:
+        for i, item in enumerate(data):
+            if i < 3:
+                print(f"Temp: i: {i}, item: {item}")  # Temp
+
             hotel = item.get("hotel") or {}
             hotel_offers = item.get("offers") or []
             if not hotel_offers:
@@ -160,6 +164,8 @@ class AmadeusHotelService:
                     "currency": currency,
                     "area": area or "unknown area",
                     "hotel_id": hotel.get("hotelId"),
+                    "lat": hotel.get("latitude"),
+                    "lon": hotel.get("longitude"),
                     "supplier": "amadeus",
                     "reason": "Amadeus hotel offer",
                 }

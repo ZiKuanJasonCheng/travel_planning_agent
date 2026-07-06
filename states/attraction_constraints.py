@@ -7,6 +7,7 @@ class BudgetConstraint(BaseModel):
 
 class PreferenceConstraint(BaseModel):
     styles: Optional[list[str]] = Field(None, description="Preferred tourism styles e.g. natural scenery, historical sites, shopping, culture experiences, local food, etc.")
+    exclusions: Optional[list[str]] = Field(None, description="Places, styles, or things to exclude e.g. Instagrammable spot, spicy food, etc.")
     must_go_places: Optional[list[str]] = Field(None, description="Some must-go places if specified")
 
 

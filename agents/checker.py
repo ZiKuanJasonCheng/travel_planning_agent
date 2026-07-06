@@ -14,6 +14,7 @@ def checker_agent(state: TripState) -> TripState:
     itinerary = state.get("itinerary", [])
     retry_count = state.get("checker_retry_count") or 0
     prior_critique = state.get("checker_critique")
+    attraction_constraints = state.get("constraints", {}).get("attraction") or {}
 
     if state.get("log_trace"):
         log_trace(
@@ -31,6 +32,7 @@ def checker_agent(state: TripState) -> TripState:
             num_people=num_people,
             itinerary=itinerary,
             prior_critique=prior_critique,
+            constraints=attraction_constraints,
         )
     except Exception as e:
         print(f"checker_agent(): LLM call failed ({e}), treating as pass")

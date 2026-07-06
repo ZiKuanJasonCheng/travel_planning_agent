@@ -4,6 +4,7 @@ from orchestration.tracability import DecisionTrace
 
 
 class TripState(TypedDict, total=False):
+    session_id: Optional[str]
     destination: str
     origin: str               # departure city / location
     num_people: int           # total number of travelers

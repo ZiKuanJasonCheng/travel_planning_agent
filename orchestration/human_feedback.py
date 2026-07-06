@@ -15,8 +15,7 @@ def apply_user_feedback(state: TripState, feedback) -> bool:
     if not new_constraints:
         return False
     
-    # Clean feedback
-    state["feedback"] = None
+    state["feedback"] = feedback
 
     existing_constraints = state.get("constraints", {})
     #print(f"existing_constraints: {existing_constraints}")
@@ -27,9 +26,10 @@ def apply_user_feedback(state: TripState, feedback) -> bool:
     print(f"merged_constraints: {merged_constraints}")
 
     # If merged constraints are the same as existing constraints, we don't need to update the constraints
-    if merged_constraints == existing_constraints:
-        print(f"apply_user_feedback(): merged_constraints == existing_constraints, state: {state}")
-        return False
+    # 20260704: We comment out the following: as long as new_constraints is not empty, we let corresponding agents run
+    # if merged_constraints == existing_constraints:
+    #     print(f"apply_user_feedback(): merged_constraints == existing_constraints, state: {state}")
+    #     return False
     # Else we update the constraints
     state["constraints"] = merged_constraints
 
