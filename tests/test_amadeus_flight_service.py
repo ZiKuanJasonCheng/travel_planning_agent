@@ -89,6 +89,46 @@ class CacheKeyTests(unittest.TestCase):
         self.assertNotEqual(key1, key2)
 
 
+class MockFlightSearchTests(unittest.TestCase):
+    def _service(self):
+        from services.amadeus_flight import AmadeusFlightService
+        service = AmadeusFlightService.__new__(AmadeusFlightService)
+        service.use_mock = True
+        service.client = None
+        service._cache = {}
+        service._cache_ttl_seconds = 900
+        return service
+
+    def test_round_trip_mock_returns_priced_candidates(self):
+        service = self._service()
+        result = service.search_flights(
+            origin="HKG", destination="KIX",
+            departure_date="2026-09-10", return_date="2026-09-16",
+        )
+        self.assertGreater(len(result), 0)
+        for candidate in result:
+            self.assertIn("outbound_legs", candidate)
+            self.assertIn("inbound_legs", candidate)
+            self.assertTrue(all("price" in leg for leg in candidate["outbound_legs"]))
+            self.assertTrue(all("price" in leg for leg in candidate["inbound_legs"]))
+
+    def test_one_way_mock_has_no_inbound_legs(self):
+        service = self._service()
+        result = service.search_flights(origin="HKG", destination="KIX", departure_date="2026-09-10")
+        self.assertGreater(len(result), 0)
+        for candidate in result:
+            self.assertIsNone(candidate["inbound_legs"])
+
+    def test_direct_flights_only_filters_multi_leg_mock_candidate(self):
+        service = self._service()
+        result = service.search_flights(
+            origin="HKG", destination="KIX", departure_date="2026-09-10",
+            outbound_preference={"direct_flights_only": True},
+        )
+        for candidate in result:
+            self.assertEqual(candidate["stops_outbound"], 0)
+
+
 class SearchFlightsTests(unittest.TestCase):
     def _round_trip_offer(self):
         return {

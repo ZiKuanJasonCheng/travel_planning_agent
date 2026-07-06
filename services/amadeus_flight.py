@@ -268,61 +268,66 @@ class AmadeusFlightService:
         origin: str,
         destination: str,
         departure_date: str,
-        return_date: Optional[str] = None,
-        max_price: Optional[int] = None,
-        preferred_airlines: Optional[List[str]] = None,
-        excluded_airlines: Optional[List[str]] = None,
-        accept_redeye_flights: bool = True,
-        direct_flights_only: bool = False,
-        preferred_departure_timeslots: Optional[List[str]] = None,
+        return_date: Optional[str],
+        outbound_preference: Optional[Dict[str, Any]],
+        inbound_preference: Optional[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        """
-        Mock flight search for development/testing when API credentials are not available
-        """
-        # Generate mock flight options
-        mock_flights = [
+        """Mock flight search for development/testing when API credentials are not available."""
+
+        def _leg(airline, frm, to, depart, arrival, date):
+            return {"airline": airline, "from": frm, "to": to, "depart_time": depart,
+                     "arrival_time": arrival, "departure_date": date}
+
+        raw_candidates = [
             {
-                "type": "flight",
-                "to": destination,
-                "airline": "CX" if not preferred_airlines else preferred_airlines[0],
-                "price": max_price if max_price else 500,
-                "currency": "USD",
-                "depart_time": "18:25:00",
-                "arrival_time": "22:00:00",
-                "departure_date": departure_date,
-                "return_depart_time": "19:00:00" if return_date else "",
-                "stops": 0,
-                "reason": "Mock flight data (Amadeus API not configured)"
+                "price": 500.0, "currency": "USD",
+                "outbound_legs_raw": [_leg("CX", origin, destination, "18:25:00", "22:00:00", departure_date)],
+                "inbound_legs_raw": (
+                    [_leg("CX", destination, origin, "19:00:00", "23:00:00", return_date)] if return_date else None
+                ),
             },
             {
-                "type": "flight",
-                "to": destination,
-                "airline": "AA",
-                "price": max_price - 100 if max_price and max_price > 100 else 400,
-                "currency": "USD",
-                "depart_time": "15:25:00",
-                "arrival_time": "17:00:00",
-                "departure_date": departure_date,
-                "return_depart_time": "10:00:00" if return_date else "",
-                "stops": 1,
-                "reason": "Mock flight data - cheaper option"
-            }
+                "price": 400.0, "currency": "USD",
+                "outbound_legs_raw": [
+                    _leg("AA", origin, "XXX", "15:25:00", "16:30:00", departure_date),
+                    _leg("AA", "XXX", destination, "17:00:00", "17:00:00", departure_date),
+                ],
+                "inbound_legs_raw": (
+                    [_leg("AA", destination, origin, "10:00:00", "14:00:00", return_date)] if return_date else None
+                ),
+            },
         ]
-        
-        if max_price:
-            mock_flights = [f for f in mock_flights if f["price"] <= max_price]
-        if excluded_airlines:
-            mock_flights = [f for f in mock_flights if f["airline"] not in excluded_airlines]
-        if preferred_airlines:
-            mock_flights = [f for f in mock_flights if f["airline"] in preferred_airlines]
-        if direct_flights_only:
-            mock_flights = [f for f in mock_flights if f["stops"] == 0]
-        if not accept_redeye_flights:
-            mock_flights = [f for f in mock_flights if not _is_redeye(f["depart_time"])]
-        if preferred_departure_timeslots:
-            mock_flights = [f for f in mock_flights if _matches_timeslots(f["depart_time"], preferred_departure_timeslots)]
 
-        return mock_flights[:5]
+        results = []
+        for c in raw_candidates:
+            outbound_legs_raw = c["outbound_legs_raw"]
+            inbound_legs_raw = c["inbound_legs_raw"]
+            total_price = c["price"]
+
+            if inbound_legs_raw:
+                outbound_total, inbound_total = total_price / 2, total_price / 2
+            else:
+                outbound_total, inbound_total = total_price, None
+
+            outbound_legs = _apply_leg_prices(outbound_legs_raw, outbound_total)
+            inbound_legs = _apply_leg_prices(inbound_legs_raw, inbound_total) if inbound_legs_raw else None
+
+            if not _passes_preference(outbound_legs, outbound_preference):
+                continue
+            if inbound_legs is not None and not _passes_preference(inbound_legs, inbound_preference):
+                continue
+
+            results.append({
+                "price": int(total_price),
+                "currency": c["currency"],
+                "outbound_legs": outbound_legs,
+                "inbound_legs": inbound_legs,
+                "stops_outbound": len(outbound_legs) - 1,
+                "stops_inbound": (len(inbound_legs) - 1) if inbound_legs else None,
+                "reason": "Mock flight data (Amadeus API not configured)",
+            })
+
+        return results[:5]
 
 
 # Singleton instance
