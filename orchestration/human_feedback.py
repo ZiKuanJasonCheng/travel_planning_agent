@@ -20,6 +20,7 @@ def apply_user_feedback(state: TripState, feedback) -> bool:
     existing_constraints = state.get("constraints", {})
     #print(f"existing_constraints: {existing_constraints}")
     dict_new_constraints = new_constraints.model_dump(exclude_none=True)
+    state["last_feedback_constraints"] = dict_new_constraints
     #print(f"dict_new_constraints: {dict_new_constraints}")
     merged_constraints = merge_constraints(existing_constraints, dict_new_constraints)
 
