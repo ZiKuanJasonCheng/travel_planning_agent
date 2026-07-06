@@ -1,5 +1,4 @@
 import unittest
-from unittest.mock import MagicMock
 
 from services.amadeus_flight import _parse_segment, _apply_leg_prices, _passes_preference, _cache_key
 
@@ -108,6 +107,38 @@ class SearchFlightsTests(unittest.TestCase):
             "price": {"currency": "USD", "total": "600.00"},
         }
 
+    def _round_trip_offer_with_airlines(self, outbound_airline, inbound_airline):
+        return {
+            "itineraries": [
+                {"segments": [
+                    {"departure": {"iataCode": "HKG", "at": "2026-09-10T17:30:00"},
+                     "arrival": {"iataCode": "KIX", "at": "2026-09-10T22:00:00"},
+                     "carrierCode": outbound_airline},
+                ]},
+                {"segments": [
+                    {"departure": {"iataCode": "KIX", "at": "2026-09-16T21:45:00"},
+                     "arrival": {"iataCode": "HKG", "at": "2026-09-17T01:00:00"},
+                     "carrierCode": inbound_airline},
+                ]},
+            ],
+            "price": {"currency": "USD", "total": "600.00"},
+        }
+
+    def _service_with_offers(self, offers):
+        from services.amadeus_flight import AmadeusFlightService
+
+        service = AmadeusFlightService.__new__(AmadeusFlightService)
+        service.use_mock = False
+        service._cache = {}
+        service._cache_ttl_seconds = 900
+        mock_response = type("R", (), {"data": offers})()
+        service.client = type("C", (), {
+            "shopping": type("S", (), {
+                "flight_offers_search": type("F", (), {"get": lambda self, **kw: mock_response})()
+            })()
+        })()
+        return service
+
     def test_search_flights_returns_split_candidate_and_caches_result(self):
         from services.amadeus_flight import AmadeusFlightService
 
@@ -183,6 +214,75 @@ class SearchFlightsTests(unittest.TestCase):
 
         result = service.search_flights(origin="HKG", destination="KIX", departure_date="2026-09-10")
         self.assertEqual(result, [{"type": "flight", "reason": "Unknown error"}])
+
+    def test_inbound_failure_drops_whole_candidate_even_when_outbound_passes(self):
+        # Outbound is CX and satisfies outbound_preference; inbound is UO and is excluded
+        # by inbound_preference. Neither direction can rescue the other's rejection, so
+        # the whole round-trip candidate must be dropped.
+        offer = self._round_trip_offer_with_airlines(outbound_airline="CX", inbound_airline="UO")
+        service = self._service_with_offers([offer])
+
+        result = service.search_flights(
+            origin="HKG", destination="KIX",
+            departure_date="2026-09-10", return_date="2026-09-16",
+            outbound_preference={"airlines": ["CX"]},
+            inbound_preference={"excluded_airlines": ["UO"]},
+        )
+
+        self.assertEqual(result, [])
+
+    def test_outbound_failure_drops_whole_candidate_even_when_inbound_would_pass(self):
+        # Converse case: outbound is CX and is excluded by outbound_preference; inbound is
+        # UO and would satisfy inbound_preference on its own. The candidate must still be
+        # dropped because outbound's rejection is not overridden by inbound passing.
+        offer = self._round_trip_offer_with_airlines(outbound_airline="CX", inbound_airline="UO")
+        service = self._service_with_offers([offer])
+
+        result = service.search_flights(
+            origin="HKG", destination="KIX",
+            departure_date="2026-09-10", return_date="2026-09-16",
+            outbound_preference={"excluded_airlines": ["CX"]},
+            inbound_preference={"airlines": ["UO"]},
+        )
+
+        self.assertEqual(result, [])
+
+    def test_cache_hit_returns_cached_result_without_calling_api_again(self):
+        from services.amadeus_flight import AmadeusFlightService
+
+        service = AmadeusFlightService.__new__(AmadeusFlightService)
+        service.use_mock = False
+        service._cache = {}
+        service._cache_ttl_seconds = 900
+
+        mock_response = type("R", (), {"data": [self._round_trip_offer()]})()
+
+        class _CountingSearch:
+            def __init__(self, response):
+                self.response = response
+                self.call_count = 0
+
+            def get(self, **kw):
+                self.call_count += 1
+                return self.response
+
+        counting_search = _CountingSearch(mock_response)
+        service.client = type("C", (), {
+            "shopping": type("S", (), {"flight_offers_search": counting_search})()
+        })()
+
+        kwargs = dict(
+            origin="HKG", destination="KIX",
+            departure_date="2026-09-10", return_date="2026-09-16",
+        )
+
+        first_result = service.search_flights(**kwargs)
+        second_result = service.search_flights(**kwargs)
+
+        # The real "API" (flight_offers_search.get) must only be hit once — the second
+        # call should be served entirely from self._cache.
+        self.assertEqual(counting_search.call_count, 1)
+        self.assertEqual(first_result, second_result)
 
 
 if __name__ == "__main__":

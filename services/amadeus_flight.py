@@ -58,9 +58,6 @@ def _apply_leg_prices(legs: List[Dict[str, Any]], direction_total: float) -> Lis
     return [{**leg, "price": int(round(per_leg_price))} for leg in legs]
 
 
-_ERROR_REASONS = {"Amadeus API error", "Unknown error"}
-
-
 def _passes_preference(legs: List[Dict[str, Any]], preference: Optional[Dict[str, Any]]) -> bool:
     """Check a direction's legs (already priced) against its preference constraints."""
     if not legs:
