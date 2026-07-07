@@ -63,7 +63,7 @@ def _resolve_preference(pref_dict: Optional[dict]) -> dict:
 def _search_mode(state: TripState, transport_constraints: dict) -> str:
     """Decide how much of the flight search to (re)run this pass.
 
-    Returns one of "full", "outbound_only", "inbound_only", "both_one_way", "none".
+    Returns one of "full", "outbound_only", "inbound_only", "none".
     """
     feedback = state.get("feedback")
     rerun_planning = transport_constraints.get("rerun_planning")
@@ -77,7 +77,10 @@ def _search_mode(state: TripState, transport_constraints: dict) -> str:
     wants_inbound = "inbound_air_ticket_preference" in last_transport
 
     if wants_outbound and wants_inbound:
-        return "both_one_way"
+        # Both directions changed at once: prefer a fresh round-trip search
+        # (with one-way fallback) over jumping straight to two one-way
+        # searches — "full" already does round-trip-first, one-way-fallback.
+        return "full"
     if wants_outbound:
         return "outbound_only"
     if wants_inbound:
@@ -285,14 +288,6 @@ def air_ticket_agent(state: TripState) -> TripState:
             )
             inbound_legs = _resolve_one_way_direction(inbound_candidates, inbound_preference, "inbound")
             outbound_legs = existing_flight.get("outbound", [])
-
-        elif mode == "both_one_way":
-            outbound_candidates, inbound_candidates = _search_one_way_pair(
-                flight_service, origin_codes, dest_codes, departure_date, return_date or departure_date,
-                num_people, outbound_preference, inbound_preference,
-            )
-            outbound_legs = _resolve_one_way_direction(outbound_candidates, outbound_preference, "outbound")
-            inbound_legs = _resolve_one_way_direction(inbound_candidates, inbound_preference, "inbound")
 
         else:  # "none"
             outbound_legs = existing_flight.get("outbound", [])

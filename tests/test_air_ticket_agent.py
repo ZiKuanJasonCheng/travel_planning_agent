@@ -59,7 +59,9 @@ class SearchModeTests(unittest.TestCase):
         }
         self.assertEqual(_search_mode(state, {}), "inbound_only")
 
-    def test_both_one_way_when_both_preferences_changed(self):
+    def test_full_when_both_preferences_changed(self):
+        """Both directions changing at once prefers a fresh round-trip search
+        (with one-way fallback) over jumping straight to two one-way searches."""
         from agents.air_ticket import _search_mode
         state = {
             "feedback": "no layovers either way",
@@ -68,7 +70,7 @@ class SearchModeTests(unittest.TestCase):
                 "inbound_air_ticket_preference": {"direct_flights_only": True},
             }},
         }
-        self.assertEqual(_search_mode(state, {}), "both_one_way")
+        self.assertEqual(_search_mode(state, {}), "full")
 
     def test_none_when_feedback_unrelated_to_transport(self):
         from agents.air_ticket import _search_mode
