@@ -47,7 +47,7 @@ def transport_agent(state: TripState) -> TripState:
     existing = state.get("transport_options")
     transport_options = (
         existing if existing and _has_any_transport_options(existing)
-        else _build_default_transport_options(destination, constraints)
+        else _fill_transport_options_with_subagent_errors()
     )
 
     if state.get("log_trace"):
@@ -78,19 +78,15 @@ def _determine_transport_sub_agents(state: TripState, constraints: dict) -> List
     return sub_agents
 
 
-def _build_default_transport_options(destination: str, constraints: dict) -> dict:
-    """Build a default transport option if sub-agents didn't produce any results."""
-    outbound_pref = constraints.get("outbound_air_ticket_preference") or {}
-    max_price = outbound_pref.get("max_price_per_ticket")
-    airlines = outbound_pref.get("airlines")
-    preferred_airline = airlines[0] if airlines else None
-
-    default_option = {
-        "type": "flight", "to": destination, "airline": preferred_airline or "CX",
-        "price": max_price if max_price else 500,
-        "depart_time": "18:25:00", "arrival_time": "22:00:00",
-        "reason": "Default option (sub-agents unavailable)",
+def _fill_transport_options_with_subagent_errors() -> dict:
+    """Fill transport_options with an error message when all sub-agents failed to produce any results."""
+    error_option = {
+        "reason": (
+            "All transport subagents (flight and railway) got failed at the moment. "
+            "Please wait for a few minutes and submit a feedback saying "
+            "'Run transport/flight service again'."
+        )
     }
     options = default_transport_options()
-    options["flight"]["outbound"] = [default_option]
+    options["flight"]["outbound"] = [error_option]
     return options

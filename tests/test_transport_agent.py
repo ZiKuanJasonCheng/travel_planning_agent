@@ -20,14 +20,18 @@ class DetermineSubAgentsTests(unittest.TestCase):
         self.assertEqual([name for name, _ in agents], ["air_ticket_agent", "train_ticket_agent"])
 
 
-class BuildDefaultTransportOptionsTests(unittest.TestCase):
-    def test_uses_outbound_preference_for_defaults(self):
-        from agents.transport import _build_default_transport_options
-        result = _build_default_transport_options("Tokyo", {
-            "outbound_air_ticket_preference": {"airlines": ["UO"], "max_price_per_ticket": 300}
-        })
-        self.assertEqual(result["flight"]["outbound"][0]["airline"], "UO")
-        self.assertEqual(result["flight"]["outbound"][0]["price"], 300)
+class FillTransportOptionsWithSubagentErrorsTests(unittest.TestCase):
+    def test_returns_reason_only_error_option(self):
+        from agents.transport import _fill_transport_options_with_subagent_errors
+        result = _fill_transport_options_with_subagent_errors()
+        self.assertEqual(
+            result["flight"]["outbound"],
+            [{"reason": (
+                "All transport subagents (flight and railway) got failed at the moment. "
+                "Please wait for a few minutes and submit a feedback saying "
+                "'Run transport/flight service again'."
+            )}],
+        )
         self.assertEqual(result["railway"], [])
         self.assertEqual(result["flight"]["inbound"], [])
 
