@@ -197,5 +197,136 @@ class ResolveRoundTripTests(unittest.TestCase):
         self.assertEqual(inbound_legs[0]["reason"], "Good value")
 
 
+class AirTicketAgentIntegrationTests(unittest.TestCase):
+    def setUp(self):
+        patcher = patch(
+            "agents.air_ticket.resolve_city_iata_codes",
+            side_effect=lambda name: {"Hong Kong": ["HKG"], "Tokyo": ["NRT"]}.get(name, [name.upper()[:3]])
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _base_state(self, **overrides):
+        state = {
+            "destination": "Tokyo",
+            "origin": "Hong Kong",
+            "num_people": 1,
+            "days": 5,
+            "start_date": "2026-09-10",
+            "end_date": "2026-09-16",
+            "constraints": {},
+            "transport_options": {"railway": [], "flight": {"outbound": [], "inbound": []}},
+            "feedback": None,
+            "log_trace": False,
+            "traces": [],
+            "dirty_agents": [],
+            "status": "planning",
+        }
+        state.update(overrides)
+        return state
+
+    def _round_trip_candidate(self, price=600):
+        return {
+            "price": price, "currency": "USD",
+            "outbound_legs": [{"airline": "CX", "price": price / 2, "depart_time": "10:00:00", "arrival_time": "14:00:00"}],
+            "inbound_legs": [{"airline": "CX", "price": price / 2, "depart_time": "19:00:00", "arrival_time": "23:00:00"}],
+            "stops_outbound": 0, "stops_inbound": 0,
+            "reason": "Amadeus API result",
+        }
+
+    @patch("agents.air_ticket.select_flights")
+    @patch("agents.air_ticket.get_flight_service")
+    def test_new_trip_uses_round_trip_when_available(self, mock_get_svc, mock_select):
+        mock_svc = MagicMock()
+        mock_svc.search_flights.return_value = [self._round_trip_candidate()]
+        mock_get_svc.return_value = mock_svc
+        mock_select.return_value = {"round_trip_index": 0, "outbound_index": None, "inbound_index": None, "reason": "Good option"}
+
+        from agents.air_ticket import air_ticket_agent
+        new_state = air_ticket_agent(self._base_state())
+
+        mock_svc.search_flights.assert_called_once()
+        flight = new_state["transport_options"]["flight"]
+        self.assertEqual(len(flight["outbound"]), 1)
+        self.assertEqual(len(flight["inbound"]), 1)
+
+    @patch("agents.air_ticket.select_flights")
+    @patch("agents.air_ticket.get_flight_service")
+    def test_new_trip_falls_back_to_one_way_pair_when_round_trip_empty(self, mock_get_svc, mock_select):
+        mock_svc = MagicMock()
+        outbound_candidate = {**self._round_trip_candidate(400), "inbound_legs": None, "stops_inbound": None}
+        inbound_candidate = {**self._round_trip_candidate(300), "outbound_legs": self._round_trip_candidate(300)["inbound_legs"], "inbound_legs": None, "stops_inbound": None}
+        mock_svc.search_flights.side_effect = [[], [outbound_candidate], [inbound_candidate]]
+        mock_get_svc.return_value = mock_svc
+        mock_select.return_value = {"round_trip_index": None, "outbound_index": 0, "inbound_index": None, "reason": "Only option"}
+
+        from agents.air_ticket import air_ticket_agent
+        new_state = air_ticket_agent(self._base_state())
+
+        self.assertEqual(mock_svc.search_flights.call_count, 3)
+        flight = new_state["transport_options"]["flight"]
+        self.assertEqual(len(flight["outbound"]), 1)
+        self.assertEqual(len(flight["inbound"]), 1)
+
+    @patch("agents.air_ticket.select_flights")
+    @patch("agents.air_ticket.get_flight_service")
+    def test_replanning_outbound_only_leaves_inbound_untouched(self, mock_get_svc, mock_select):
+        mock_svc = MagicMock()
+        outbound_candidate = {**self._round_trip_candidate(400), "inbound_legs": None, "stops_inbound": None}
+        mock_svc.search_flights.return_value = [outbound_candidate]
+        mock_get_svc.return_value = mock_svc
+        mock_select.return_value = {"round_trip_index": None, "outbound_index": 0, "inbound_index": None, "reason": "Better outbound"}
+
+        existing_inbound = [{"airline": "UO", "price": 250, "depart_time": "19:00:00", "reason": "kept from before"}]
+        state = self._base_state(
+            feedback="no layovers on the way there",
+            last_feedback_constraints={"transport": {"outbound_air_ticket_preference": {"direct_flights_only": True}}},
+            transport_options={"railway": [], "flight": {"outbound": [], "inbound": existing_inbound}},
+        )
+
+        from agents.air_ticket import air_ticket_agent
+        new_state = air_ticket_agent(state)
+
+        mock_svc.search_flights.assert_called_once()
+        flight = new_state["transport_options"]["flight"]
+        self.assertEqual(len(flight["outbound"]), 1)
+        self.assertEqual(flight["inbound"], existing_inbound)
+
+    @patch("agents.air_ticket.select_flights")
+    @patch("agents.air_ticket.get_flight_service")
+    def test_all_error_tier_produces_templated_message(self, mock_get_svc, mock_select):
+        mock_svc = MagicMock()
+        mock_svc.search_flights.side_effect = [
+            [{"type": "flight", "reason": "Amadeus API error"}],  # round trip
+            [{"type": "flight", "reason": "Amadeus API error"}],  # outbound fallback
+            [{"type": "flight", "reason": "Unknown error"}],      # inbound fallback
+        ]
+        mock_get_svc.return_value = mock_svc
+
+        from agents.air_ticket import air_ticket_agent
+        new_state = air_ticket_agent(self._base_state())
+
+        mock_select.assert_not_called()
+        flight = new_state["transport_options"]["flight"]
+        self.assertIn("Amadeus API error (or unknown error)", flight["outbound"][0]["reason"])
+        self.assertIn("Amadeus API error (or unknown error)", flight["inbound"][0]["reason"])
+
+    @patch("agents.air_ticket.get_flight_service")
+    def test_rerun_planning_is_reset_after_use(self, mock_get_svc):
+        mock_svc = MagicMock()
+        mock_svc.search_flights.return_value = []
+        mock_get_svc.return_value = mock_svc
+
+        state = self._base_state(
+            feedback="please try again",
+            constraints={"transport": {"rerun_planning": True}},
+        )
+
+        from agents.air_ticket import air_ticket_agent
+        new_state = air_ticket_agent(state)
+
+        self.assertIsNone(new_state["constraints"]["transport"]["rerun_planning"])
+
+
 if __name__ == "__main__":
     unittest.main()
