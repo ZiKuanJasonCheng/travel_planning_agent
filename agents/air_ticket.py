@@ -7,6 +7,7 @@ from orchestration.tracability import log_trace
 from services.amadeus_flight import AmadeusFlightService, get_flight_service
 from services.airline_iata_resolver import resolve_airline_iata_codes
 from services.city_iata_resolver import resolve_city_iata_codes
+from services.llm_flight_selector_service import select_flights
 from copy import deepcopy
 from datetime import datetime, timedelta
 from typing import Optional
@@ -60,6 +61,92 @@ def _search_mode(state: TripState, transport_constraints: dict) -> str:
     if wants_inbound:
         return "inbound_only"
     return "none"
+
+
+_ERROR_REASONS = {"Amadeus API error", "Unknown error"}
+
+_NO_RESULTS_MESSAGE = {
+    "reason": "No suitable flights were found. Please change your flight preferences and submit feedback again."
+}
+
+_ERROR_MESSAGE = {
+    "reason": (
+        "There's an Amadeus API error (or unknown error) at the moment. "
+        "Please wait for a few minutes and submit a feedback saying "
+        "'Run transport/flight service again'."
+    )
+}
+
+_PARTIAL_ERROR_WARNING = (
+    " There were a few API errors during the run. Therefore, the selected flight "
+    "might not be the best option. You can wait for a few minutes and submit "
+    "feedback saying 'Run transport/flight service again'."
+)
+
+
+def _split_candidates(candidates: list) -> tuple:
+    """Return (valid_candidates, has_errors, all_errors)."""
+    if not candidates:
+        return [], False, False
+    valid = [c for c in candidates if c.get("reason") not in _ERROR_REASONS]
+    has_errors = len(valid) < len(candidates)
+    all_errors = has_errors and len(valid) == 0
+    return valid, has_errors, all_errors
+
+
+def _resolve_one_way_direction(candidates: list, preference: dict, direction: str) -> list:
+    """direction is 'outbound' or 'inbound' — used only to route the correct preference
+    dict and read the correct index from the LLM selection. One-way search candidates always
+    carry their single leg list under "outbound_legs" regardless of which real-world direction
+    they represent (only true round-trip candidates ever populate "inbound_legs"), so legs are
+    always read from "outbound_legs" here."""
+    if not candidates:
+        return [dict(_NO_RESULTS_MESSAGE)]
+
+    valid, has_errors, all_errors = _split_candidates(candidates)
+
+    if all_errors:
+        return [dict(_ERROR_MESSAGE)]
+    if not valid:
+        return [dict(_NO_RESULTS_MESSAGE)]
+
+    selection = select_flights(
+        outbound_candidates=valid if direction == "outbound" else None,
+        inbound_candidates=valid if direction == "inbound" else None,
+        outbound_preference=preference if direction == "outbound" else None,
+        inbound_preference=preference if direction == "inbound" else None,
+    )
+    index = selection["outbound_index"] if direction == "outbound" else selection["inbound_index"]
+    if index is None or not (0 <= index < len(valid)):
+        index = 0
+    chosen = valid[index]
+    reason = selection["reason"]
+    if has_errors:
+        reason += _PARTIAL_ERROR_WARNING
+    legs = chosen.get("outbound_legs") or []
+    return [{**leg, "reason": reason} for leg in legs]
+
+
+def _resolve_round_trip(candidates: list):
+    """Returns (outbound_legs, inbound_legs) for the LLM-chosen round-trip candidate,
+    or None if the caller should fall back to a one-way pair search."""
+    if not candidates:
+        return None
+    valid, has_errors, all_errors = _split_candidates(candidates)
+    if all_errors or not valid:
+        return None
+
+    selection = select_flights(round_trip_candidates=valid)
+    index = selection["round_trip_index"]
+    if index is None or not (0 <= index < len(valid)):
+        index = 0
+    chosen = valid[index]
+    reason = selection["reason"]
+    if has_errors:
+        reason += _PARTIAL_ERROR_WARNING
+    outbound_legs = [{**leg, "reason": reason} for leg in (chosen.get("outbound_legs") or [])]
+    inbound_legs = [{**leg, "reason": reason} for leg in (chosen.get("inbound_legs") or [])]
+    return outbound_legs, inbound_legs
 
 
 def air_ticket_agent(state: TripState) -> TripState:
