@@ -1,5 +1,6 @@
 import pytest
 from db.repository import SessionRepository
+from states.trip_state import default_transport_options
 
 
 SAMPLE_STATE = {
@@ -72,3 +73,21 @@ def test_search_no_results_returns_empty_list(clean_sessions):
     repo.create("sess-005", SAMPLE_STATE)
     results = repo.search("zzznomatch")
     assert results == []
+
+
+@pytest.mark.integration
+def test_get_normalizes_old_flat_list_transport_options(clean_sessions):
+    """Sessions persisted before the transport_options shape change stored a
+    flat list. get() must normalize that into the new {"railway": [...],
+    "flight": {"outbound": [...], "inbound": [...]}} shape so downstream
+    code calling .get("flight") on it doesn't crash with AttributeError.
+    """
+    repo = SessionRepository()
+    old_shape_state = {
+        **SAMPLE_STATE,
+        "transport_options": [{"type": "flight", "airline": "CX"}],
+    }
+    repo.create("sess-006", old_shape_state)
+    result = repo.get("sess-006")
+    assert isinstance(result["transport_options"], dict)
+    assert result["transport_options"] == default_transport_options()

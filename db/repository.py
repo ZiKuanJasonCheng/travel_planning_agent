@@ -2,6 +2,7 @@ import json
 from typing import Optional
 from sqlalchemy import text
 from db.connection import get_engine
+from states.trip_state import default_transport_options
 
 
 def _state_to_json(state: dict) -> str:
@@ -59,7 +60,12 @@ class SessionRepository:
                 text("SELECT state FROM sessions WHERE session_id = :sid"),
                 {"sid": session_id},
             ).fetchone()
-        return dict(row[0]) if row else None
+        if row is None:
+            return None
+        state = dict(row[0])
+        if not isinstance(state.get("transport_options"), dict):
+            state["transport_options"] = default_transport_options()
+        return state
 
     def update(self, session_id: str, state: dict) -> None:
         search_text = _build_search_text(state)
