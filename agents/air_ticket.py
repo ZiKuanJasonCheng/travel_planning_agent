@@ -85,6 +85,14 @@ def _search_mode(state: TripState, transport_constraints: dict) -> str:
         return "outbound_only"
     if wants_inbound:
         return "inbound_only"
+
+    if "transport_type" in last_transport:
+        transport_options = state.get("transport_options") or {}
+        flight = transport_options.get("flight") or {}
+        has_flights = bool(flight.get("outbound")) or bool(flight.get("inbound"))
+        if not has_flights and transport_constraints.get("transport_type") in ("flight", "both"):
+            return "full"
+
     return "none"
 
 

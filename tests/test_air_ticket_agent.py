@@ -80,6 +80,33 @@ class SearchModeTests(unittest.TestCase):
         }
         self.assertEqual(_search_mode(state, {}), "none")
 
+    def test_full_when_transport_type_switched_to_flight_with_no_existing_legs(self):
+        """A user who originally chose train (no flight legs ever searched) later
+        switches transport_type to 'flight' without mentioning a directional
+        preference in the same message. There's nothing to show yet, so this
+        must trigger a fresh full search rather than falling through to 'none'."""
+        from agents.air_ticket import _search_mode
+        state = {
+            "feedback": "actually let's fly instead",
+            "last_feedback_constraints": {"transport": {"transport_type": "flight"}},
+            "transport_options": {"railway": [], "flight": {"outbound": [], "inbound": []}},
+        }
+        self.assertEqual(_search_mode(state, {"transport_type": "flight"}), "full")
+
+    def test_none_when_transport_type_switched_but_flights_already_exist(self):
+        """If flight legs already exist from an earlier round, merely mentioning
+        transport_type again should not force a fresh full search."""
+        from agents.air_ticket import _search_mode
+        state = {
+            "feedback": "actually let's fly instead",
+            "last_feedback_constraints": {"transport": {"transport_type": "flight"}},
+            "transport_options": {
+                "railway": [],
+                "flight": {"outbound": [{"airline": "CX"}], "inbound": []},
+            },
+        }
+        self.assertEqual(_search_mode(state, {"transport_type": "flight"}), "none")
+
 
 class SplitCandidatesTests(unittest.TestCase):
     def test_empty_list(self):
