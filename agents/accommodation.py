@@ -10,8 +10,7 @@ def accommodation_agent(state: TripState) -> TripState:
     constraints = state.get("constraints", {}).get("accommodation", {})
     destination = state.get("destination", "")
     days = state.get("days") or 1
-    transport = (state.get("transport_options") or [{}])[0]
-    
+
     if state["log_trace"]:
         log_trace(
             state,

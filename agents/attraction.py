@@ -14,10 +14,13 @@ def attraction_agent(state: TripState) -> TripState:
     start_date = state.get("start_date")
     checker_critique = state.get("checker_critique")
     constraints = state.get("constraints", {}).get("attraction", {})
-    transport = (state.get("transport_options") or [{}])[0]
+    transport_options = state.get("transport_options") or {}
+    flight = transport_options.get("flight") or {}
+    outbound_legs = flight.get("outbound") or []
+    inbound_legs = flight.get("inbound") or []
     hotel = (state.get("accommodation_options") or [{}])[0]
-    arrival_time = transport.get("arrival_time")
-    return_depart_time = transport.get("return_depart_time")
+    arrival_time = outbound_legs[-1].get("arrival_time") if outbound_legs else None
+    return_depart_time = inbound_legs[0].get("depart_time") if inbound_legs else None
     hotel_area = hotel.get("area")
     hotel_lat = hotel.get("lat")
     hotel_lon = hotel.get("lon")
