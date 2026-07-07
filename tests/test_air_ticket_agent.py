@@ -314,6 +314,24 @@ class AirTicketAgentIntegrationTests(unittest.TestCase):
         self.assertIn("Amadeus API error (or unknown error)", flight["inbound"][0]["reason"])
 
     @patch("agents.air_ticket.get_flight_service")
+    def test_unhandled_exception_produces_symmetric_error_message(self, mock_get_svc):
+        """A raised (not tiered-candidate) exception during the search itself
+        must not silently leave one direction empty while the other gets an
+        explanatory message — both should get the same error-tier message."""
+        mock_svc = MagicMock()
+        mock_svc.search_flights.side_effect = RuntimeError("boom")
+        mock_get_svc.return_value = mock_svc
+
+        from agents.air_ticket import air_ticket_agent
+        new_state = air_ticket_agent(self._base_state())
+
+        flight = new_state["transport_options"]["flight"]
+        self.assertEqual(len(flight["outbound"]), 1)
+        self.assertEqual(len(flight["inbound"]), 1)
+        self.assertIn("Amadeus API error (or unknown error)", flight["outbound"][0]["reason"])
+        self.assertIn("Amadeus API error (or unknown error)", flight["inbound"][0]["reason"])
+
+    @patch("agents.air_ticket.get_flight_service")
     def test_rerun_planning_is_reset_after_use(self, mock_get_svc):
         mock_svc = MagicMock()
         mock_svc.search_flights.return_value = []

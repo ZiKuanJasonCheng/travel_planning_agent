@@ -303,8 +303,8 @@ def air_ticket_agent(state: TripState) -> TripState:
         transport_options = {
             **existing_transport_options,
             "flight": {
-                "outbound": existing_flight.get("outbound") or [dict(_NO_RESULTS_MESSAGE)],
-                "inbound": existing_flight.get("inbound") or [],
+                "outbound": existing_flight.get("outbound") or [dict(_ERROR_MESSAGE)],
+                "inbound": existing_flight.get("inbound") or [dict(_ERROR_MESSAGE)],
             },
         }
 
