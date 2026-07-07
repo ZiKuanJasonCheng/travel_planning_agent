@@ -346,13 +346,13 @@ def get_flight_service() -> AmadeusFlightService:
 if __name__ == "__main__":
     # Test API:
     flight_service = get_flight_service()
-    flight_service.search_flights(
-        origin="HKG",
-        destination="KIX",
-        departure_date="2026-04-13",
-        return_date="2026-04-18",
-        adults=1,
-        max_price=None,
-        preferred_airlines=["UO"],
-        flight_class=None
-    )
+    # flight_service.search_flights(
+    #     origin="HKG",
+    #     destination="KIX",
+    #     departure_date="2026-04-13",
+    #     return_date="2026-04-18",
+    #     adults=1,
+    #     max_price=None,
+    #     preferred_airlines=["UO"],
+    #     flight_class=None
+    # )

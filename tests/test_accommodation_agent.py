@@ -18,7 +18,7 @@ class AccommodationAgentTests(unittest.TestCase):
             "destination": "Tokyo",
             "days": 4,
             "constraints": {},
-            "transport_options": [],
+            "transport_options": {"railway": [], "flight": {"outbound": [], "inbound": []}},
             "accommodation_options": [],
             "log_trace": False,
             "traces": [],

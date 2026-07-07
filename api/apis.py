@@ -3,7 +3,7 @@ from session import create_session, get_session, update_session
 from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List
 from datetime import date, timedelta
-from states.trip_state import TripState
+from states.trip_state import TripState, default_transport_options
 from orchestration.human_feedback import apply_user_feedback
 from orchestration.graph_runner import run_until_needing_feedback_or_finished
 from orchestration.llm_feedback_parsing import parse_feedback_with_llm
@@ -81,6 +81,7 @@ def start_trip(param: RequestModel):
         "end_date": param.end_date,
         "preferences": param.preferences,
         "constraints": constraints,
+        "transport_options": default_transport_options(),
         "status": "planning",
         "log_trace": True,
         "dirty_agents": ["transport_agent", "accommodation_agent", "attraction_agent"],

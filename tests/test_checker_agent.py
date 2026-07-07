@@ -163,7 +163,13 @@ class AttractionAgentCheckerIntegrationTests(unittest.TestCase):
             "num_people": 2,
             "start_date": "2025-08-01",
             "constraints": {},
-            "transport_options": [{"arrival_time": "10:00:00", "return_depart_time": "18:00:00"}],
+            "transport_options": {
+                "railway": [],
+                "flight": {
+                    "outbound": [{"airline": "CX", "arrival_time": "10:00:00"}],
+                    "inbound": [{"airline": "CX", "depart_time": "18:00:00"}],
+                },
+            },
             "accommodation_options": [{"area": "Shinjuku"}],
             "itinerary": None,
             "checker_retry_count": 0,
