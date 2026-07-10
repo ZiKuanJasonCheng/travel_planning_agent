@@ -31,21 +31,49 @@ class TransportConstraint(BaseModel):
     outbound_air_ticket_preference: Optional[FlightPreferenceConstraint] = Field(
         None,
         description=(
-            "Flight preferences for the outbound (departure) leg. If the user's statement "
-            "does not specify a direction (no mention of 'departure'/'way there' vs "
-            "'return'/'way back'/'coming back'), the preference applies to BOTH legs — "
-            "fill in the identical preference here AND in inbound_air_ticket_preference; "
-            "do not leave inbound_air_ticket_preference null in that case."
+            "Flight preferences for the outbound (departure) leg. Decide direction PER FIELD, "
+            "not per statement — a single message can mix general and directional preferences: "
+            "for each field of FlightPreferenceConstraint (airlines, flight_class, "
+            "excluded_airlines, accept_redeye_flights, direct_flights_only, "
+            "preferred_departure_timeslots, max_price_per_ticket), if the user's wording for "
+            "THAT field does not mention a direction ('way there'/'departure' vs 'way back'/"
+            "'return'/'coming back'), copy the SAME value into that field in BOTH "
+            "outbound_air_ticket_preference and inbound_air_ticket_preference. Only fields the "
+            "user explicitly tied to one direction should differ between the two. "
+            "Example: 'I prefer Cathay Pacific business class, no JetStar, no red-eye flights. "
+            "Direct flights only on the way there, but stops are fine on the way back.' → "
+            "outbound_air_ticket_preference={airlines:['Cathay Pacific'], flight_class:'business', "
+            "excluded_airlines:['JetStar'], accept_redeye_flights:false, direct_flights_only:true}, "
+            "inbound_air_ticket_preference={airlines:['Cathay Pacific'], flight_class:'business', "
+            "excluded_airlines:['JetStar'], accept_redeye_flights:false, direct_flights_only:false}. "
+            "Note airlines/flight_class/excluded_airlines/accept_redeye_flights (not tied to a "
+            "direction) are copied to BOTH sides even though direct_flights_only (explicitly "
+            "directional) differs — do not null out the other fields on inbound just because "
+            "one field in the same message was directional."
         ),
     )
     inbound_air_ticket_preference: Optional[FlightPreferenceConstraint] = Field(
         None,
         description=(
-            "Flight preferences for the inbound (return) leg. If the user's statement "
-            "does not specify a direction (no mention of 'departure'/'way there' vs "
-            "'return'/'way back'/'coming back'), the preference applies to BOTH legs — "
-            "fill in the identical preference here AND in outbound_air_ticket_preference; "
-            "do not leave outbound_air_ticket_preference null in that case."
+            "Flight preferences for the inbound (return) leg. Decide direction PER FIELD, "
+            "not per statement — a single message can mix general and directional preferences: "
+            "for each field of FlightPreferenceConstraint (airlines, flight_class, "
+            "excluded_airlines, accept_redeye_flights, direct_flights_only, "
+            "preferred_departure_timeslots, max_price_per_ticket), if the user's wording for "
+            "THAT field does not mention a direction ('way there'/'departure' vs 'way back'/"
+            "'return'/'coming back'), copy the SAME value into that field in BOTH "
+            "outbound_air_ticket_preference and inbound_air_ticket_preference. Only fields the "
+            "user explicitly tied to one direction should differ between the two. "
+            "Example: 'I prefer Cathay Pacific business class, no JetStar, no red-eye flights. "
+            "Direct flights only on the way there, but stops are fine on the way back.' → "
+            "outbound_air_ticket_preference={airlines:['Cathay Pacific'], flight_class:'business', "
+            "excluded_airlines:['JetStar'], accept_redeye_flights:false, direct_flights_only:true}, "
+            "inbound_air_ticket_preference={airlines:['Cathay Pacific'], flight_class:'business', "
+            "excluded_airlines:['JetStar'], accept_redeye_flights:false, direct_flights_only:false}. "
+            "Note airlines/flight_class/excluded_airlines/accept_redeye_flights (not tied to a "
+            "direction) are copied to BOTH sides even though direct_flights_only (explicitly "
+            "directional) differs — do not null out the other fields on outbound just because "
+            "one field in the same message was directional."
         ),
     )
     railway_ticket_preference: Optional[RailwayTicketPreferenceConstraint] = Field(
