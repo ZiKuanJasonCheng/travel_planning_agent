@@ -93,8 +93,7 @@ class AccommodationAgentTests(unittest.TestCase):
         state = self._base_state()
         state["constraints"] = {
             "accommodation": {
-                "budget": {"max_price_per_night": 150},
-                "preference": {"area": "Shinjuku"},
+                "preference": {"max_price_per_night": 150, "area": "Shinjuku"},
             }
         }
 

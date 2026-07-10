@@ -56,10 +56,9 @@ Be specific so the planner can act on each issue."""
 
 def _build_constraints_lines(constraints: dict) -> str:
     parts = []
-    budget = constraints.get("budget") or {}
     preference = constraints.get("preference") or {}
-    if budget.get("max_price_per_ticket") is not None:
-        parts.append(f"Max price per ticket/activity: {budget['max_price_per_ticket']} USD")
+    if preference.get("max_price_per_ticket") is not None:
+        parts.append(f"Max price per ticket/activity: {preference['max_price_per_ticket']} USD")
     if preference.get("styles"):
         parts.append(f"Preferred styles: {', '.join(preference['styles'])}")
     if preference.get("exclusions"):

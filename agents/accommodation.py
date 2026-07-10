@@ -23,9 +23,8 @@ def accommodation_agent(state: TripState) -> TripState:
     max_price_per_night = None
     preferred_area = None
 
-    if constraints.get("budget"):
-        max_price_per_night = constraints["budget"].get("max_price_per_night")
     if constraints.get("preference"):
+        max_price_per_night = constraints["preference"].get("max_price_per_night")
         preferred_area = constraints["preference"].get("area")
 
     check_in_date = state.get("start_date") or _default_check_in_date()

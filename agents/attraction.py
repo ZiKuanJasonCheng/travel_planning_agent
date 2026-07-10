@@ -31,9 +31,8 @@ def attraction_agent(state: TripState) -> TripState:
     must_go_places = None
     exclusions = None
 
-    if constraints.get("budget"):
-        max_price_per_ticket = constraints["budget"].get("max_price_per_ticket")
     if constraints.get("preference"):
+        max_price_per_ticket = constraints["preference"].get("max_price_per_ticket")
         styles = constraints["preference"].get("styles")
         must_go_places = constraints["preference"].get("must_go_places")
         exclusions = constraints["preference"].get("exclusions")
