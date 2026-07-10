@@ -29,10 +29,24 @@ class RailwayTicketPreferenceConstraint(BaseModel):
 
 class TransportConstraint(BaseModel):
     outbound_air_ticket_preference: Optional[FlightPreferenceConstraint] = Field(
-        None, description="Flight preferences for the outbound (departure) leg only."
+        None,
+        description=(
+            "Flight preferences for the outbound (departure) leg. If the user's statement "
+            "does not specify a direction (no mention of 'departure'/'way there' vs "
+            "'return'/'way back'/'coming back'), the preference applies to BOTH legs — "
+            "fill in the identical preference here AND in inbound_air_ticket_preference; "
+            "do not leave inbound_air_ticket_preference null in that case."
+        ),
     )
     inbound_air_ticket_preference: Optional[FlightPreferenceConstraint] = Field(
-        None, description="Flight preferences for the inbound (return) leg only."
+        None,
+        description=(
+            "Flight preferences for the inbound (return) leg. If the user's statement "
+            "does not specify a direction (no mention of 'departure'/'way there' vs "
+            "'return'/'way back'/'coming back'), the preference applies to BOTH legs — "
+            "fill in the identical preference here AND in outbound_air_ticket_preference; "
+            "do not leave outbound_air_ticket_preference null in that case."
+        ),
     )
     railway_ticket_preference: Optional[RailwayTicketPreferenceConstraint] = Field(
         None, description="Preferences for train/railway tickets, if applicable."
