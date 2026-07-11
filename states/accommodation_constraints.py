@@ -11,4 +11,12 @@ class PreferenceConstraint(BaseModel):
 
 class AccommodationConstraint(BaseModel):
     preference: Optional[PreferenceConstraint] = None
+    rerun_planning: Optional[bool] = Field(
+        None,
+        description=(
+            "True if the user wants the accommodation search rerun from scratch, "
+            "regardless of whether they provided any new preferences — e.g. after "
+            "receiving an API error last time, or simply wanting to try again."
+        ),
+    )
 
