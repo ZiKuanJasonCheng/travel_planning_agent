@@ -7,7 +7,7 @@ import json
 import os
 from typing import Optional
 
-from openai import OpenAI
+from openai import OpenAI, APIError
 
 
 _ACTIVITY_SCHEMA = """{
@@ -237,9 +237,12 @@ Respond ONLY with valid JSON matching this structure:
             )
             parsed = json.loads(response.choices[0].message.content)
             return self._normalize(parsed.get("itinerary", []))
+        except APIError as e:
+            print(f"LLMItineraryService.{context}() OpenAI API error: {e}")
+            return [{"day": None, "activities": [], "reason": "LLM API error"}]
         except Exception as e:
             print(f"LLMItineraryService.{context}() error: {e}")
-            return []
+            return [{"day": None, "activities": [], "reason": "Unknown error"}]
 
     def _normalize(self, llm_itinerary: list[dict]) -> list[dict]:
         result = []
