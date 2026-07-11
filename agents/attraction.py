@@ -2,10 +2,53 @@ from copy import deepcopy
 
 from states.trip_state import TripState
 from orchestration.tracability import log_trace
+from orchestration.merge_constraints import resolve_category_constraints
 from services.llm_itinerary_service import get_llm_itinerary_service
 
 
+_ERROR_REASONS = {"LLM API error", "Unknown error"}
+
+_ERROR_MESSAGE = {
+    "reason": (
+        "There's an LLM API error (or unknown error) at the moment. "
+        "Please wait for a few minutes and submit a feedback saying "
+        "'Run attraction service again'."
+    )
+}
+
+
+def _had_errors(itinerary: list) -> bool:
+    """Check a list of day-plans (either a fresh LLM result or a previously-
+    persisted state["itinerary"]) for an error-tier reason, covering both the
+    raw error tags and the persisted long-form message, at either the day-plan
+    or activity level."""
+    error_texts = _ERROR_REASONS | {_ERROR_MESSAGE["reason"]}
+    for day_plan in itinerary:
+        if day_plan.get("reason") in error_texts:
+            return True
+        for act in day_plan.get("activities", []):
+            if act.get("reason") in error_texts:
+                return True
+    return False
+
+
 def attraction_agent(state: TripState) -> TripState:
+    merged, unchanged = resolve_category_constraints(state, "attraction")
+    existing_itinerary = state.get("itinerary") or []
+
+    should_skip = (
+        unchanged
+        and merged.get("rerun_planning") is not True
+        and state.get("checker_critique") is None
+        and not _had_errors(existing_itinerary)
+    )
+
+    constraints = dict(state.get("constraints") or {})
+
+    if should_skip:
+        constraints["attraction"] = merged
+        return {**state, "constraints": constraints}
+
     # Step 1: Extract state
     destination = state.get("destination", "")
     origin = state.get("origin")
@@ -13,7 +56,6 @@ def attraction_agent(state: TripState) -> TripState:
     days = state.get("days") or 1
     start_date = state.get("start_date")
     checker_critique = state.get("checker_critique")
-    constraints = state.get("constraints", {}).get("attraction", {})
     transport_options = state.get("transport_options") or {}
     flight = transport_options.get("flight") or {}
     outbound_legs = flight.get("outbound") or []
@@ -26,16 +68,11 @@ def attraction_agent(state: TripState) -> TripState:
     hotel_lon = hotel.get("lon")
 
     # Step 2: Extract constraints
-    max_price_per_ticket = None
-    styles = None
-    must_go_places = None
-    exclusions = None
-
-    if constraints.get("preference"):
-        max_price_per_ticket = constraints["preference"].get("max_price_per_ticket")
-        styles = constraints["preference"].get("styles")
-        must_go_places = constraints["preference"].get("must_go_places")
-        exclusions = constraints["preference"].get("exclusions")
+    preference = merged.get("preference") or {}
+    max_price_per_ticket = preference.get("max_price_per_ticket")
+    styles = preference.get("styles")
+    must_go_places = preference.get("must_go_places")
+    exclusions = preference.get("exclusions")
     print(f"attraction_agent(): max_price_per_ticket: {max_price_per_ticket}, styles: {styles}, must_go_places: {must_go_places}, exclusions: {exclusions}")
 
     # Step 3: log_trace at entry
@@ -45,15 +82,18 @@ def attraction_agent(state: TripState) -> TripState:
             node="attraction_agent",
             action="execute",
             reason="Generating attraction recommendations",
-            inputs={"constraints": deepcopy(constraints)},
+            inputs={"constraints": deepcopy(merged)},
         )
 
     # Step 4: Generate or update itinerary via LLM
     llm_service = get_llm_itinerary_service()
-    existing_itinerary = state.get("itinerary")
+
+    # An error-sentinel itinerary from a previously failed round isn't a real
+    # existing itinerary to update from — generate fresh instead.
+    has_real_existing_itinerary = bool(existing_itinerary) and not _had_errors(existing_itinerary)
 
     try:
-        if existing_itinerary:
+        if has_real_existing_itinerary:
             itinerary = llm_service.update_itinerary(
                 existing_itinerary=existing_itinerary,
                 destination=destination,
@@ -90,7 +130,9 @@ def attraction_agent(state: TripState) -> TripState:
                 hotel_lon=hotel_lon,
             )
 
-        if not itinerary:
+        if _had_errors(itinerary):
+            itinerary = existing_itinerary if has_real_existing_itinerary else [dict(_ERROR_MESSAGE, day=None, activities=[])]
+        elif not itinerary:
             itinerary = _build_fallback_itinerary(destination, days, hotel_area, hotel_lat, hotel_lon)
     except Exception as e:
         print(f"attraction_agent(): unexpected error: {e}")
@@ -106,10 +148,14 @@ def attraction_agent(state: TripState) -> TripState:
             outputs={"itinerary": deepcopy(itinerary)},
         )
 
-    dirty_agents = list(state.get("dirty_agents", []))  # TBD: to directly add checker_agent to the graph where attraction_agent is followed by checker_agent
+    if merged.get("rerun_planning") is True:
+        merged = {**merged, "rerun_planning": None}
+    constraints["attraction"] = merged
+
+    dirty_agents = list(state.get("dirty_agents", []))
     dirty_agents.append("checker_agent")
     print(f"attraction_agent(): generated {len(itinerary)} days")
-    return {**state, "itinerary": itinerary, "dirty_agents": dirty_agents}
+    return {**state, "itinerary": itinerary, "dirty_agents": dirty_agents, "constraints": constraints}
 
 
 def _build_fallback_itinerary(
