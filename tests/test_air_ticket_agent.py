@@ -287,6 +287,7 @@ class AirTicketAgentIntegrationTests(unittest.TestCase):
             "start_date": "2026-09-10",
             "end_date": "2026-09-16",
             "constraints": {},
+            "new_constraints": {},
             "transport_options": {"railway": [], "flight": {"outbound": [], "inbound": []}},
             "feedback": None,
             "log_trace": False,
@@ -352,7 +353,7 @@ class AirTicketAgentIntegrationTests(unittest.TestCase):
         existing_inbound = [{"airline": "UO", "price": 250, "depart_time": "19:00:00", "reason": "kept from before"}]
         state = self._base_state(
             feedback="no layovers on the way there",
-            last_feedback_constraints={"transport": {"outbound_air_ticket_preference": {"direct_flights_only": True}}},
+            new_constraints={"transport": {"outbound_air_ticket_preference": {"direct_flights_only": True}}},
             transport_options={"railway": [], "flight": {"outbound": [], "inbound": existing_inbound}},
         )
 
@@ -416,6 +417,53 @@ class AirTicketAgentIntegrationTests(unittest.TestCase):
         new_state = air_ticket_agent(state)
 
         self.assertIsNone(new_state["constraints"]["transport"]["rerun_planning"])
+
+    @patch("agents.air_ticket.select_flights")
+    @patch("agents.air_ticket.get_flight_service")
+    def test_replanning_skips_when_restated_preference_already_satisfied(self, mock_get_svc, mock_select):
+        mock_svc = MagicMock()
+        mock_get_svc.return_value = mock_svc
+
+        existing_outbound = [{"airline": "CX", "flight_class": "business", "reason": "Good option"}]
+        existing_inbound = [{"airline": "CX", "flight_class": "business", "reason": "Good option"}]
+        state = self._base_state(
+            feedback="business class please",
+            constraints={"transport": {
+                "outbound_air_ticket_preference": {"flight_class": "business"},
+                "inbound_air_ticket_preference": {"flight_class": "business"},
+            }},
+            new_constraints={"transport": {"outbound_air_ticket_preference": {"flight_class": "business"}}},
+            transport_options={"railway": [], "flight": {"outbound": existing_outbound, "inbound": existing_inbound}},
+        )
+
+        from agents.air_ticket import air_ticket_agent
+        new_state = air_ticket_agent(state)
+
+        mock_svc.search_flights.assert_not_called()
+        mock_select.assert_not_called()
+        flight = new_state["transport_options"]["flight"]
+        self.assertEqual(flight["outbound"], existing_outbound)
+        self.assertEqual(flight["inbound"], existing_inbound)
+
+    @patch("agents.air_ticket.get_flight_service")
+    def test_skip_still_persists_merged_constraints(self, mock_get_svc):
+        mock_svc = MagicMock()
+        mock_get_svc.return_value = mock_svc
+
+        state = self._base_state(
+            feedback="business class please",
+            constraints={"transport": {"outbound_air_ticket_preference": {"flight_class": "business"}}},
+            new_constraints={"transport": {"outbound_air_ticket_preference": {"flight_class": "business"}}},
+        )
+
+        from agents.air_ticket import air_ticket_agent
+        new_state = air_ticket_agent(state)
+
+        mock_svc.search_flights.assert_not_called()
+        self.assertEqual(
+            new_state["constraints"]["transport"]["outbound_air_ticket_preference"],
+            {"flight_class": "business"},
+        )
 
 
 if __name__ == "__main__":

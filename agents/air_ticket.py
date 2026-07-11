@@ -8,6 +8,7 @@ from typing import Optional
 
 from states.trip_state import TripState, default_transport_options
 from orchestration.tracability import log_trace
+from orchestration.merge_constraints import merge_constraints
 from services.amadeus_flight import AmadeusFlightService, get_flight_service
 from services.airline_iata_resolver import resolve_airline_iata_codes
 from services.city_iata_resolver import resolve_city_iata_codes
@@ -245,17 +246,19 @@ def air_ticket_agent(state: TripState) -> TripState:
     """
     destination = state.get("destination", "")
     days = state.get("days", 1)
-    transport_constraints = dict(state.get("constraints", {}).get("transport") or {})
+    existing_transport = state.get("constraints", {}).get("transport") or {}
+    new_transport = state.get("new_constraints", {}).get("transport") or {}
+    merged_transport = merge_constraints(existing_transport, new_transport)
 
     if state.get("log_trace"):
         log_trace(
             state, node="air_ticket_agent", action="execute",
             reason="Searching for flight options",
-            inputs={"constraints": deepcopy(transport_constraints), "destination": destination},
+            inputs={"constraints": deepcopy(merged_transport), "destination": destination},
         )
 
-    outbound_preference = _resolve_preference(transport_constraints.get("outbound_air_ticket_preference"))
-    inbound_preference = _resolve_preference(transport_constraints.get("inbound_air_ticket_preference"))
+    outbound_preference = _resolve_preference(merged_transport.get("outbound_air_ticket_preference"))
+    inbound_preference = _resolve_preference(merged_transport.get("inbound_air_ticket_preference"))
 
     origin = state.get("origin")
     num_people = state.get("num_people") or 1
@@ -269,8 +272,8 @@ def air_ticket_agent(state: TripState) -> TripState:
     existing_transport_options = state.get("transport_options") or default_transport_options()
     existing_flight = existing_transport_options.get("flight") or {"outbound": [], "inbound": []}
 
-    mode = _search_mode(state, transport_constraints)
-    rerun_planning_was_set = transport_constraints.get("rerun_planning") is True
+    mode = _search_mode(state, existing_transport, merged_transport)
+    rerun_planning_was_set = merged_transport.get("rerun_planning") is True
 
     try:
         if mode == "full":
@@ -335,11 +338,11 @@ def air_ticket_agent(state: TripState) -> TripState:
     new_state = {**state, "transport_options": transport_options}
 
     if rerun_planning_was_set:
-        constraints = dict(new_state.get("constraints") or {})
-        transport = dict(constraints.get("transport") or {})
-        transport["rerun_planning"] = None
-        constraints["transport"] = transport
-        new_state["constraints"] = constraints
+        merged_transport = {**merged_transport, "rerun_planning": None}
+
+    constraints = dict(new_state.get("constraints") or {})
+    constraints["transport"] = merged_transport
+    new_state["constraints"] = constraints
 
     if state.get("log_trace"):
         log_trace(
