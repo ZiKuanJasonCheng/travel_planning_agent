@@ -75,10 +75,10 @@ class AmadeusHotelService:
             )
         except ResponseError as error:
             print(f"Amadeus Hotel API error: {error}")
-            return []
+            return [{"reason": "Amadeus Hotel API error"}]
         except Exception as error:
             print(f"Unexpected Amadeus hotel error: {error}")
-            return []
+            return [{"reason": "Unknown error"}]
 
 
     def _fetch_offers_resilient(
