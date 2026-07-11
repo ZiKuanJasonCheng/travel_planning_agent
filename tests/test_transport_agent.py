@@ -6,18 +6,52 @@ from unittest.mock import patch
 class DetermineSubAgentsTests(unittest.TestCase):
     def test_reads_transport_type_from_top_level(self):
         from agents.transport import _determine_transport_sub_agents
-        agents = _determine_transport_sub_agents({}, {"transport_type": "train"})
+        agents = _determine_transport_sub_agents("train")
         self.assertEqual([name for name, _ in agents], ["train_ticket_agent"])
 
     def test_defaults_to_air_when_unset(self):
         from agents.transport import _determine_transport_sub_agents
-        agents = _determine_transport_sub_agents({}, {})
+        agents = _determine_transport_sub_agents(None)
         self.assertEqual([name for name, _ in agents], ["air_ticket_agent"])
 
     def test_both_calls_both_agents(self):
         from agents.transport import _determine_transport_sub_agents
-        agents = _determine_transport_sub_agents({}, {"transport_type": "both"})
+        agents = _determine_transport_sub_agents("both")
         self.assertEqual([name for name, _ in agents], ["air_ticket_agent", "train_ticket_agent"])
+
+
+class ResolveTransportTypeTests(unittest.TestCase):
+    def test_uses_this_rounds_value_when_stated(self):
+        from agents.transport import _resolve_transport_type
+        state = {
+            "constraints": {"transport": {"transport_type": "train"}},
+            "new_constraints": {"transport": {"transport_type": "flight"}},
+        }
+        self.assertEqual(_resolve_transport_type(state), "flight")
+
+    def test_falls_back_to_existing_when_not_stated_this_round(self):
+        from agents.transport import _resolve_transport_type
+        state = {
+            "constraints": {"transport": {"transport_type": "train"}},
+            "new_constraints": {"transport": {"outbound_air_ticket_preference": {"flight_class": "business"}}},
+        }
+        self.assertEqual(_resolve_transport_type(state), "train")
+
+    def test_returns_none_when_never_stated(self):
+        from agents.transport import _resolve_transport_type
+        state = {"constraints": {}, "new_constraints": {}}
+        self.assertIsNone(_resolve_transport_type(state))
+
+    def test_new_transport_type_explicitly_none_still_wins_over_existing(self):
+        """If this round's parse explicitly includes transport_type: None (unusual
+        but possible), that still counts as "stated this round" per the 'transport_type'
+        in new_transport check — this documents that edge case's actual behavior."""
+        from agents.transport import _resolve_transport_type
+        state = {
+            "constraints": {"transport": {"transport_type": "train"}},
+            "new_constraints": {"transport": {"transport_type": None}},
+        }
+        self.assertIsNone(_resolve_transport_type(state))
 
 
 class FillTransportOptionsWithSubagentErrorsTests(unittest.TestCase):

@@ -2,17 +2,27 @@
 Transport Agent - Main agent that coordinates transportation planning
 Delegates to sub-agents: air_ticket_agent, train_ticket_agent
 """
+from typing import List, Optional
+
 from states.trip_state import TripState, default_transport_options
 from orchestration.tracability import log_trace
 from agents.air_ticket import air_ticket_agent
 from agents.train_ticket import train_ticket_agent
 from copy import deepcopy
-from typing import List
 
 
 def _has_any_transport_options(transport_options: dict) -> bool:
     flight = transport_options.get("flight") or {}
     return bool(transport_options.get("railway")) or bool(flight.get("outbound")) or bool(flight.get("inbound"))
+
+
+def _resolve_transport_type(state: TripState) -> Optional[str]:
+    """This round's stated transport_type wins if given; otherwise fall back
+    to last round's agreed value. No full merge needed just for routing."""
+    new_transport = state.get("new_constraints", {}).get("transport") or {}
+    if "transport_type" in new_transport:
+        return new_transport.get("transport_type")
+    return (state.get("constraints", {}).get("transport") or {}).get("transport_type")
 
 
 def transport_agent(state: TripState) -> TripState:
@@ -21,16 +31,16 @@ def transport_agent(state: TripState) -> TripState:
     Delegates to air_ticket_agent and train_ticket_agent based on requirements
     """
     destination = state.get("destination", "")
-    constraints = state.get("constraints", {}).get("transport", {})
+    transport_type = _resolve_transport_type(state)
 
     if state.get("log_trace"):
         log_trace(
             state, node="transport_agent", action="execute",
             reason="Coordinating transportation planning with sub-agents",
-            inputs={"constraints": deepcopy(constraints), "destination": destination},
+            inputs={"transport_type": transport_type, "destination": destination},
         )
 
-    sub_agents_to_call = _determine_transport_sub_agents(state, constraints)
+    sub_agents_to_call = _determine_transport_sub_agents(transport_type)
 
     for sub_agent_name, sub_agent_func in sub_agents_to_call:
         if state.get("log_trace"):
@@ -62,14 +72,13 @@ def transport_agent(state: TripState) -> TripState:
     return {**state, "transport_options": transport_options}
 
 
-def _determine_transport_sub_agents(state: TripState, constraints: dict) -> List[tuple]:
+def _determine_transport_sub_agents(transport_type: Optional[str]) -> List[tuple]:
     """Determine which transport sub-agents should be called."""
     sub_agents = []
-    transport_type_preference = constraints.get("transport_type")
 
-    if transport_type_preference == "train":
+    if transport_type == "train":
         sub_agents.append(("train_ticket_agent", train_ticket_agent))
-    elif transport_type_preference == "both":
+    elif transport_type == "both":
         sub_agents.append(("air_ticket_agent", air_ticket_agent))
         sub_agents.append(("train_ticket_agent", train_ticket_agent))
     else:
