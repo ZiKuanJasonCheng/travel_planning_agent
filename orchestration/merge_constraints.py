@@ -32,5 +32,20 @@ def merge_constraints(old_constraints: Dict | None, new_constraints: Dict | None
             merged_constraints[key] = merge_constraints(old_value, new_value)
         else:
             merged_constraints[key] = new_value
-    
+
     return merged_constraints
+
+
+def resolve_category_constraints(state: dict, category: str) -> tuple[dict, bool]:
+    """Merge this round's new_constraints[category] into constraints[category].
+
+    Returns (merged, unchanged). `unchanged` is only True when this is NOT a
+    brand-new trip (state["feedback"] is not None) and the merge produced no
+    difference from the existing value — i.e. it's safe for the caller to
+    consider skipping replanning, pending its own rerun_planning/error checks.
+    """
+    existing = state.get("constraints", {}).get(category) or {}
+    new = state.get("new_constraints", {}).get(category) or {}
+    merged = merge_constraints(existing, new)
+    unchanged = state.get("feedback") is not None and merged == existing
+    return merged, unchanged

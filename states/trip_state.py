@@ -23,8 +23,8 @@ class TripState(TypedDict, total=False):
     itinerary: List[dict]
 
     feedback: Optional[str]
-    constraints: Constraints
-    last_feedback_constraints: Optional[dict]  # this round's parsed (pre-merge) constraints
+    constraints: Constraints          # Last round's AGREED (merged) constraints — not touched by apply_user_feedback
+    new_constraints: Optional[dict]   # This round's raw parsed feedback, pre-merge
 
     #rerun_target: Optional[str]
     log_trace: bool
