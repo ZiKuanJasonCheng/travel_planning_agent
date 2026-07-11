@@ -60,37 +60,53 @@ def _resolve_preference(pref_dict: Optional[dict]) -> dict:
     }
 
 
-def _search_mode(state: TripState, transport_constraints: dict) -> str:
-    """Decide how much of the flight search to (re)run this pass.
+def _had_direction_errors(legs: list) -> bool:
+    """Check whether a direction's persisted legs indicate a full or partial
+    error from the last run — either the full-error template verbatim, or
+    the partial-error warning appended to an otherwise-successful selection."""
+    return any(
+        _ERROR_MESSAGE["reason"] in leg.get("reason", "")
+        or "API errors during the run" in leg.get("reason", "")
+        for leg in legs
+    )
+
+
+def _search_mode(state: TripState, existing_transport: dict, merged_transport: dict) -> str:
+    """Decide how much of the flight search to (re)run this pass, per direction,
+    based on whether the merged preference actually differs from what's already
+    agreed (not merely whether this round's feedback mentioned it).
 
     Returns one of "full", "outbound_only", "inbound_only", "none".
     """
     feedback = state.get("feedback")
-    rerun_planning = transport_constraints.get("rerun_planning")
-
-    if feedback is None or rerun_planning is True:
+    if feedback is None or merged_transport.get("rerun_planning") is True:
         return "full"
 
-    last_feedback = state.get("last_feedback_constraints") or {}
-    last_transport = last_feedback.get("transport") or {}
-    wants_outbound = "outbound_air_ticket_preference" in last_transport
-    wants_inbound = "inbound_air_ticket_preference" in last_transport
+    existing_outbound_pref = existing_transport.get("outbound_air_ticket_preference") or {}
+    merged_outbound_pref = merged_transport.get("outbound_air_ticket_preference") or {}
+    existing_inbound_pref = existing_transport.get("inbound_air_ticket_preference") or {}
+    merged_inbound_pref = merged_transport.get("inbound_air_ticket_preference") or {}
 
-    if wants_outbound and wants_inbound:
-        # Both directions changed at once: prefer a fresh round-trip search
-        # (with one-way fallback) over jumping straight to two one-way
-        # searches — "full" already does round-trip-first, one-way-fallback.
+    transport_options = state.get("transport_options") or {}
+    flight = transport_options.get("flight") or {}
+    outbound_legs = flight.get("outbound") or []
+    inbound_legs = flight.get("inbound") or []
+
+    outbound_changed = merged_outbound_pref != existing_outbound_pref or _had_direction_errors(outbound_legs)
+    inbound_changed = merged_inbound_pref != existing_inbound_pref or _had_direction_errors(inbound_legs)
+
+    if outbound_changed and inbound_changed:
         return "full"
-    if wants_outbound:
+    if outbound_changed:
         return "outbound_only"
-    if wants_inbound:
+    if inbound_changed:
         return "inbound_only"
 
-    if "transport_type" in last_transport:
-        transport_options = state.get("transport_options") or {}
-        flight = transport_options.get("flight") or {}
-        has_flights = bool(flight.get("outbound")) or bool(flight.get("inbound"))
-        if not has_flights and transport_constraints.get("transport_type") in ("flight", "both"):
+    existing_transport_type = existing_transport.get("transport_type")
+    merged_transport_type = merged_transport.get("transport_type")
+    if merged_transport_type != existing_transport_type:
+        has_flights = bool(outbound_legs) or bool(inbound_legs)
+        if not has_flights and merged_transport_type in ("flight", "both"):
             return "full"
 
     return "none"

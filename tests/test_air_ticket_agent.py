@@ -36,76 +36,119 @@ class SearchModeTests(unittest.TestCase):
     def test_new_trip_returns_full(self):
         from agents.air_ticket import _search_mode
         state = {"feedback": None}
-        self.assertEqual(_search_mode(state, {}), "full")
+        self.assertEqual(_search_mode(state, {}, {}), "full")
 
     def test_rerun_planning_returns_full(self):
         from agents.air_ticket import _search_mode
         state = {"feedback": "please try again"}
-        self.assertEqual(_search_mode(state, {"rerun_planning": True}), "full")
+        self.assertEqual(_search_mode(state, {}, {"rerun_planning": True}), "full")
 
-    def test_outbound_only_when_only_outbound_preference_changed(self):
+    def test_outbound_only_when_merged_outbound_preference_differs(self):
         from agents.air_ticket import _search_mode
         state = {
             "feedback": "no layovers on the way there",
-            "last_feedback_constraints": {"transport": {"outbound_air_ticket_preference": {"direct_flights_only": True}}},
+            "transport_options": {"flight": {"outbound": [], "inbound": []}},
         }
-        self.assertEqual(_search_mode(state, {}), "outbound_only")
+        existing = {}
+        merged = {"outbound_air_ticket_preference": {"direct_flights_only": True}}
+        self.assertEqual(_search_mode(state, existing, merged), "outbound_only")
 
-    def test_inbound_only_when_only_inbound_preference_changed(self):
+    def test_inbound_only_when_merged_inbound_preference_differs(self):
         from agents.air_ticket import _search_mode
         state = {
             "feedback": "business class on the way back",
-            "last_feedback_constraints": {"transport": {"inbound_air_ticket_preference": {"flight_class": "BUSINESS"}}},
+            "transport_options": {"flight": {"outbound": [], "inbound": []}},
         }
-        self.assertEqual(_search_mode(state, {}), "inbound_only")
+        existing = {}
+        merged = {"inbound_air_ticket_preference": {"flight_class": "BUSINESS"}}
+        self.assertEqual(_search_mode(state, existing, merged), "inbound_only")
 
-    def test_full_when_both_preferences_changed(self):
-        """Both directions changing at once prefers a fresh round-trip search
-        (with one-way fallback) over jumping straight to two one-way searches."""
+    def test_full_when_both_directions_differ(self):
         from agents.air_ticket import _search_mode
         state = {
             "feedback": "no layovers either way",
-            "last_feedback_constraints": {"transport": {
-                "outbound_air_ticket_preference": {"direct_flights_only": True},
-                "inbound_air_ticket_preference": {"direct_flights_only": True},
-            }},
+            "transport_options": {"flight": {"outbound": [], "inbound": []}},
         }
-        self.assertEqual(_search_mode(state, {}), "full")
+        existing = {}
+        merged = {
+            "outbound_air_ticket_preference": {"direct_flights_only": True},
+            "inbound_air_ticket_preference": {"direct_flights_only": True},
+        }
+        self.assertEqual(_search_mode(state, existing, merged), "full")
+
+    def test_none_when_restating_an_already_satisfied_preference(self):
+        """The core bug this upgrade fixes: mentioning a preference whose merged
+        value is identical to what's already there must NOT trigger a re-search."""
+        from agents.air_ticket import _search_mode
+        state = {
+            "feedback": "business class please",
+            "transport_options": {"flight": {"outbound": [], "inbound": []}},
+        }
+        existing = {"outbound_air_ticket_preference": {"flight_class": "business"}}
+        merged = {"outbound_air_ticket_preference": {"flight_class": "business"}}
+        self.assertEqual(_search_mode(state, existing, merged), "none")
 
     def test_none_when_feedback_unrelated_to_transport(self):
         from agents.air_ticket import _search_mode
         state = {
             "feedback": "add a museum on day 2",
-            "last_feedback_constraints": {"attraction": {"preference": {"styles": ["museum"]}}},
+            "transport_options": {"flight": {"outbound": [], "inbound": []}},
         }
-        self.assertEqual(_search_mode(state, {}), "none")
+        self.assertEqual(_search_mode(state, {}, {}), "none")
 
     def test_full_when_transport_type_switched_to_flight_with_no_existing_legs(self):
-        """A user who originally chose train (no flight legs ever searched) later
-        switches transport_type to 'flight' without mentioning a directional
-        preference in the same message. There's nothing to show yet, so this
-        must trigger a fresh full search rather than falling through to 'none'."""
         from agents.air_ticket import _search_mode
         state = {
             "feedback": "actually let's fly instead",
-            "last_feedback_constraints": {"transport": {"transport_type": "flight"}},
-            "transport_options": {"railway": [], "flight": {"outbound": [], "inbound": []}},
+            "transport_options": {"flight": {"outbound": [], "inbound": []}},
         }
-        self.assertEqual(_search_mode(state, {"transport_type": "flight"}), "full")
+        existing = {"transport_type": "train"}
+        merged = {"transport_type": "flight"}
+        self.assertEqual(_search_mode(state, existing, merged), "full")
 
     def test_none_when_transport_type_switched_but_flights_already_exist(self):
-        """If flight legs already exist from an earlier round, merely mentioning
-        transport_type again should not force a fresh full search."""
         from agents.air_ticket import _search_mode
         state = {
             "feedback": "actually let's fly instead",
-            "last_feedback_constraints": {"transport": {"transport_type": "flight"}},
+            "transport_options": {"flight": {"outbound": [{"airline": "CX"}], "inbound": []}},
+        }
+        existing = {"transport_type": "train"}
+        merged = {"transport_type": "flight"}
+        self.assertEqual(_search_mode(state, existing, merged), "none")
+
+    def test_outbound_only_when_last_run_had_full_error_on_outbound(self):
+        from agents.air_ticket import _search_mode, _ERROR_MESSAGE
+        state = {
+            "feedback": "add a museum on day 2",
             "transport_options": {
-                "railway": [],
-                "flight": {"outbound": [{"airline": "CX"}], "inbound": []},
+                "flight": {
+                    "outbound": [dict(_ERROR_MESSAGE)],
+                    "inbound": [{"airline": "CX", "reason": "Good option"}],
+                },
             },
         }
-        self.assertEqual(_search_mode(state, {"transport_type": "flight"}), "none")
+        self.assertEqual(_search_mode(state, {}, {}), "outbound_only")
+
+    def test_inbound_only_when_last_run_had_partial_error_on_inbound(self):
+        from agents.air_ticket import _search_mode
+        state = {
+            "feedback": "add a museum on day 2",
+            "transport_options": {
+                "flight": {
+                    "outbound": [{"airline": "CX", "reason": "Good option"}],
+                    "inbound": [{
+                        "airline": "UO",
+                        "reason": (
+                            "Best available. There were a few API errors during the run. "
+                            "Therefore, the selected flight might not be the best option. "
+                            "You can wait for a few minutes and submit feedback saying "
+                            "'Run transport/flight service again'."
+                        ),
+                    }],
+                },
+            },
+        }
+        self.assertEqual(_search_mode(state, {}, {}), "inbound_only")
 
 
 class SplitCandidatesTests(unittest.TestCase):
