@@ -40,6 +40,16 @@ class ResolveCategoryConstraintsTests(unittest.TestCase):
         self.assertEqual(merged, {})
         self.assertTrue(unchanged)
 
+    def test_explicit_none_constraints_does_not_crash(self):
+        """A key present but set to None (as opposed to absent) must not crash —
+        .get(key, default) only substitutes the default when the key is missing,
+        not when its value is falsy, so this must be handled explicitly."""
+        from orchestration.merge_constraints import resolve_category_constraints
+        state = {"feedback": "some feedback", "constraints": None, "new_constraints": None}
+        merged, unchanged = resolve_category_constraints(state, "attraction")
+        self.assertEqual(merged, {})
+        self.assertTrue(unchanged)
+
 
 if __name__ == "__main__":
     unittest.main()

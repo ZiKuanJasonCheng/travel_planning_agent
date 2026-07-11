@@ -44,8 +44,8 @@ def resolve_category_constraints(state: dict, category: str) -> tuple[dict, bool
     difference from the existing value — i.e. it's safe for the caller to
     consider skipping replanning, pending its own rerun_planning/error checks.
     """
-    existing = state.get("constraints", {}).get(category) or {}
-    new = state.get("new_constraints", {}).get(category) or {}
+    existing = (state.get("constraints") or {}).get(category) or {}
+    new = (state.get("new_constraints") or {}).get(category) or {}
     merged = merge_constraints(existing, new)
     unchanged = state.get("feedback") is not None and merged == existing
     return merged, unchanged
