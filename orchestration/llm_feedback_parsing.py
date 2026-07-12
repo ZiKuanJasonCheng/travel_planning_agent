@@ -45,7 +45,8 @@ def parse_feedback_with_llm(feedback: str) -> Optional[Constraints]:
                 }
             }],
             tool_choice={"type": "function", "function": {"name": "extract_constraints"}},
-            timeout=60
+            timeout=60,
+            temperature=0
         )
 
         # print(f"response: {response}")

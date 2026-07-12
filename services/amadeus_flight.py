@@ -185,6 +185,7 @@ class AmadeusFlightService:
                 search_params["travelClass"] = inbound_class.upper()
             # If both are set and differ, omit travelClass — a single request can't express two cabins.
 
+            print(f"search_flights(): search_params: {search_params}")
             response = self.client.shopping.flight_offers_search.get(**search_params)
             print(f"search_flights(): len(response.data): {len(response.data)}")
 
@@ -198,7 +199,7 @@ class AmadeusFlightService:
 
             # Sort by price
             flights.sort(key=lambda x: x.get("price", float("inf")))
-            result = flights[:10]
+            result = flights  #[:10]
             self._cache[cache_key] = (time.time(), result)
             return result
 
@@ -346,13 +347,34 @@ def get_flight_service() -> AmadeusFlightService:
 if __name__ == "__main__":
     # Test API:
     flight_service = get_flight_service()
-    # flight_service.search_flights(
-    #     origin="HKG",
-    #     destination="KIX",
-    #     departure_date="2026-04-13",
-    #     return_date="2026-04-18",
-    #     adults=1,
-    #     max_price=None,
-    #     preferred_airlines=["UO"],
-    #     flight_class=None
-    # )
+    results = flight_service.search_flights(
+        origin="HKG",
+        destination="KIX",
+        departure_date="2026-09-12",
+        return_date="2026-09-17",
+        adults=2,
+        outbound_preference={
+            "airlines": [
+                "CX"
+            ],
+            "flight_class": "business",
+            "excluded_airlines": [
+                "JQ"
+            ],
+            "accept_redeye_flights": False,
+            "direct_flights_only": True
+        },
+        inbound_preference={
+            "airlines": [
+                "CX"
+            ],
+            "flight_class": "business",
+            "excluded_airlines": [
+                "JQ"
+            ],
+            "accept_redeye_flights": False,
+            "direct_flights_only": True
+        },
+    )
+    print(f"Test: results: {results}")
+    print(f"Test: len(results): {len(results)}")
