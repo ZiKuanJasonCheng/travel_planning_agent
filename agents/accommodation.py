@@ -1,6 +1,6 @@
 from states.trip_state import TripState
 from orchestration.tracability import log_trace
-from orchestration.merge_constraints import resolve_category_constraints
+from orchestration.merge_constraints import resolve_category_constraints, UNLIMITED_PRICE
 from services.amadeus_hotel import get_amadeus_hotel_service
 from services.booking_hotel import get_booking_hotel_service
 from copy import deepcopy
@@ -27,8 +27,19 @@ def _had_errors(options: list) -> bool:
     return any(opt.get("reason") in error_texts for opt in options)
 
 
+def _fill_unlimited_price(merged: dict) -> dict:
+    """If no round has ever set a price cap, treat it as unlimited rather than
+    leaving it None, so a restated-unchanged preference compares equal across
+    rounds and search calls don't misread an unset field as a zero cap."""
+    preference = merged.get("preference") or {}
+    if preference.get("max_price_per_night") is not None:
+        return merged
+    return {**merged, "preference": {**preference, "max_price_per_night": UNLIMITED_PRICE}}
+
+
 def accommodation_agent(state: TripState) -> TripState:
     merged, unchanged = resolve_category_constraints(state, "accommodation")
+    merged = _fill_unlimited_price(merged)
     existing_options = state.get("accommodation_options") or []
 
     should_skip = (

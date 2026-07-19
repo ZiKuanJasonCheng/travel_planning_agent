@@ -8,7 +8,7 @@ from typing import Optional
 
 from states.trip_state import TripState, default_transport_options
 from orchestration.tracability import log_trace
-from orchestration.merge_constraints import merge_constraints
+from orchestration.merge_constraints import merge_constraints, UNLIMITED_PRICE
 from services.amadeus_flight import AmadeusFlightService, get_flight_service
 from services.airline_iata_resolver import resolve_airline_iata_codes
 from services.city_iata_resolver import resolve_city_iata_codes
@@ -59,6 +59,24 @@ def _resolve_preference(pref_dict: Optional[dict]) -> dict:
         "direct_flights_only": pref_dict.get("direct_flights_only", False),
         "preferred_departure_timeslots": preferred_departure_timeslots,
     }
+
+
+def _fill_unlimited_price(merged_transport: dict) -> dict:
+    """If a direction already has a preference but no round has ever set a
+    price cap for it, treat the cap as unlimited rather than leaving it None,
+    so a restated-unchanged preference compares equal across rounds and the
+    Amadeus search doesn't misread an unset field as a zero cap. A direction
+    with no preference at all is left untouched — synthesizing a price-only
+    preference dict out of nothing would falsely register as a change for
+    that direction in _search_mode's per-direction comparison."""
+    result = dict(merged_transport)
+    for key in ("outbound_air_ticket_preference", "inbound_air_ticket_preference"):
+        pref = result.get(key)
+        if pref is None:
+            continue
+        if pref.get("max_price_per_ticket") is None:
+            result[key] = {**pref, "max_price_per_ticket": UNLIMITED_PRICE}
+    return result
 
 
 def _had_direction_errors(legs: list) -> bool:
@@ -249,6 +267,7 @@ def air_ticket_agent(state: TripState) -> TripState:
     existing_transport = state.get("constraints", {}).get("transport") or {}
     new_transport = state.get("new_constraints", {}).get("transport") or {}
     merged_transport = merge_constraints(existing_transport, new_transport)
+    merged_transport = _fill_unlimited_price(merged_transport)
 
     if state.get("log_trace"):
         log_trace(

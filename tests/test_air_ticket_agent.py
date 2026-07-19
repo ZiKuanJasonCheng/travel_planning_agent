@@ -1,6 +1,45 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+from orchestration.merge_constraints import UNLIMITED_PRICE
+
+
+class FillUnlimitedPriceTests(unittest.TestCase):
+    def test_fills_unlimited_when_direction_preference_exists_but_price_unset(self):
+        from agents.air_ticket import _fill_unlimited_price
+        merged_transport = {"outbound_air_ticket_preference": {"flight_class": "business"}}
+        result = _fill_unlimited_price(merged_transport)
+        self.assertEqual(
+            result["outbound_air_ticket_preference"]["max_price_per_ticket"], UNLIMITED_PRICE
+        )
+
+    def test_leaves_real_price_untouched(self):
+        from agents.air_ticket import _fill_unlimited_price
+        merged_transport = {"outbound_air_ticket_preference": {"max_price_per_ticket": 500}}
+        result = _fill_unlimited_price(merged_transport)
+        self.assertEqual(result["outbound_air_ticket_preference"]["max_price_per_ticket"], 500)
+
+    def test_leaves_absent_direction_preference_untouched(self):
+        """A direction with no preference at all (None) must stay None — filling
+        in a price-only preference dict out of nothing would falsely register
+        as a change for that direction in _search_mode's per-direction diff."""
+        from agents.air_ticket import _fill_unlimited_price
+        merged_transport = {"outbound_air_ticket_preference": {"flight_class": "business"}}
+        result = _fill_unlimited_price(merged_transport)
+        self.assertIsNone(result.get("inbound_air_ticket_preference"))
+
+    def test_fills_both_directions_independently(self):
+        from agents.air_ticket import _fill_unlimited_price
+        merged_transport = {
+            "outbound_air_ticket_preference": {"max_price_per_ticket": 500},
+            "inbound_air_ticket_preference": {"flight_class": "business"},
+        }
+        result = _fill_unlimited_price(merged_transport)
+        self.assertEqual(result["outbound_air_ticket_preference"]["max_price_per_ticket"], 500)
+        self.assertEqual(
+            result["inbound_air_ticket_preference"]["max_price_per_ticket"], UNLIMITED_PRICE
+        )
+
 
 class ResolvePreferenceTests(unittest.TestCase):
     @patch("agents.air_ticket.resolve_airline_iata_codes", side_effect=lambda names: [n.upper()[:2] for n in names])
@@ -424,13 +463,15 @@ class AirTicketAgentIntegrationTests(unittest.TestCase):
         mock_svc = MagicMock()
         mock_get_svc.return_value = mock_svc
 
+        # "existing" already carries the unlimited-price sentinel, as a real prior
+        # round's air_ticket_agent call would have persisted it via _fill_unlimited_price.
         existing_outbound = [{"airline": "CX", "flight_class": "business", "reason": "Good option"}]
         existing_inbound = [{"airline": "CX", "flight_class": "business", "reason": "Good option"}]
         state = self._base_state(
             feedback="business class please",
             constraints={"transport": {
-                "outbound_air_ticket_preference": {"flight_class": "business"},
-                "inbound_air_ticket_preference": {"flight_class": "business"},
+                "outbound_air_ticket_preference": {"flight_class": "business", "max_price_per_ticket": 1_000_000_000},
+                "inbound_air_ticket_preference": {"flight_class": "business", "max_price_per_ticket": 1_000_000_000},
             }},
             new_constraints={"transport": {"outbound_air_ticket_preference": {"flight_class": "business"}}},
             transport_options={"railway": [], "flight": {"outbound": existing_outbound, "inbound": existing_inbound}},
@@ -450,9 +491,11 @@ class AirTicketAgentIntegrationTests(unittest.TestCase):
         mock_svc = MagicMock()
         mock_get_svc.return_value = mock_svc
 
+        # "existing" already carries the unlimited-price sentinel, as a real prior
+        # round's air_ticket_agent call would have persisted it via _fill_unlimited_price.
         state = self._base_state(
             feedback="business class please",
-            constraints={"transport": {"outbound_air_ticket_preference": {"flight_class": "business"}}},
+            constraints={"transport": {"outbound_air_ticket_preference": {"flight_class": "business", "max_price_per_ticket": 1_000_000_000}}},
             new_constraints={"transport": {"outbound_air_ticket_preference": {"flight_class": "business"}}},
         )
 
@@ -462,7 +505,7 @@ class AirTicketAgentIntegrationTests(unittest.TestCase):
         mock_svc.search_flights.assert_not_called()
         self.assertEqual(
             new_state["constraints"]["transport"]["outbound_air_ticket_preference"],
-            {"flight_class": "business"},
+            {"flight_class": "business", "max_price_per_ticket": 1_000_000_000},
         )
 
 

@@ -1,6 +1,25 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+from agents.attraction import _fill_unlimited_price
+from orchestration.merge_constraints import UNLIMITED_PRICE
+
+
+class FillUnlimitedPriceTests(unittest.TestCase):
+    def test_fills_unlimited_when_price_unset(self):
+        merged = {"preference": {"styles": ["natural scenery"]}}
+        result = _fill_unlimited_price(merged)
+        self.assertEqual(result["preference"]["max_price_per_ticket"], UNLIMITED_PRICE)
+
+    def test_leaves_real_price_untouched(self):
+        merged = {"preference": {"max_price_per_ticket": 40}}
+        result = _fill_unlimited_price(merged)
+        self.assertEqual(result["preference"]["max_price_per_ticket"], 40)
+
+    def test_handles_missing_preference(self):
+        result = _fill_unlimited_price({})
+        self.assertEqual(result["preference"]["max_price_per_ticket"], UNLIMITED_PRICE)
+
 
 class AttractionTransportReadTests(unittest.TestCase):
     @patch("agents.attraction.get_llm_itinerary_service")
@@ -40,7 +59,9 @@ class AttractionAgentSkipLogicTests(unittest.TestCase):
             "destination": "Tokyo", "origin": "Hong Kong", "days": 3, "num_people": 2,
             "start_date": "2026-09-10",
             "feedback": "some prior feedback",
-            "constraints": {"attraction": {"preference": {"styles": ["natural scenery"]}}},
+            # Already carries the unlimited-price sentinel, as a real prior round's
+            # attraction_agent call would have persisted it via _fill_unlimited_price.
+            "constraints": {"attraction": {"preference": {"styles": ["natural scenery"], "max_price_per_ticket": 1_000_000_000}}},
             "new_constraints": {},
             "transport_options": {"railway": [], "flight": {"outbound": [], "inbound": []}},
             "accommodation_options": [{"area": "Shinjuku"}],
@@ -62,7 +83,7 @@ class AttractionAgentSkipLogicTests(unittest.TestCase):
         self.assertNotIn("checker_agent", new_state.get("dirty_agents", []))
         self.assertEqual(
             new_state["constraints"]["attraction"],
-            {"preference": {"styles": ["natural scenery"]}},
+            {"preference": {"styles": ["natural scenery"], "max_price_per_ticket": 1_000_000_000}},
         )
 
     @patch("agents.attraction.get_llm_itinerary_service")

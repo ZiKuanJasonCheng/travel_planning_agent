@@ -1,7 +1,24 @@
 import unittest
 from unittest.mock import patch, MagicMock
 
-from agents.accommodation import accommodation_agent
+from agents.accommodation import accommodation_agent, _fill_unlimited_price
+from orchestration.merge_constraints import UNLIMITED_PRICE
+
+
+class FillUnlimitedPriceTests(unittest.TestCase):
+    def test_fills_unlimited_when_price_unset(self):
+        merged = {"preference": {"area": "Shinjuku"}}
+        result = _fill_unlimited_price(merged)
+        self.assertEqual(result["preference"]["max_price_per_night"], UNLIMITED_PRICE)
+
+    def test_leaves_real_price_untouched(self):
+        merged = {"preference": {"max_price_per_night": 150}}
+        result = _fill_unlimited_price(merged)
+        self.assertEqual(result["preference"]["max_price_per_night"], 150)
+
+    def test_handles_missing_preference(self):
+        result = _fill_unlimited_price({})
+        self.assertEqual(result["preference"]["max_price_per_night"], UNLIMITED_PRICE)
 
 
 class _StubSupplier:

@@ -44,6 +44,13 @@ class TransportConstraintTests(unittest.TestCase):
         description = schema["properties"]["rerun_planning"]["description"]
         self.assertIn("rerun", description.lower())
 
+    def test_direct_flights_only_defaults_to_none(self):
+        """Must default to None (not False) so an unmentioned direct_flights_only
+        this round doesn't overwrite an existing True from a prior round — see
+        merge_constraints()'s None-preserving merge rule."""
+        pref = FlightPreferenceConstraint()
+        self.assertIsNone(pref.direct_flights_only)
+
 
 if __name__ == "__main__":
     unittest.main()

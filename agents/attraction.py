@@ -2,7 +2,7 @@ from copy import deepcopy
 
 from states.trip_state import TripState
 from orchestration.tracability import log_trace
-from orchestration.merge_constraints import resolve_category_constraints
+from orchestration.merge_constraints import resolve_category_constraints, UNLIMITED_PRICE
 from services.llm_itinerary_service import get_llm_itinerary_service
 
 
@@ -32,8 +32,19 @@ def _had_errors(itinerary: list) -> bool:
     return False
 
 
+def _fill_unlimited_price(merged: dict) -> dict:
+    """If no round has ever set a price cap, treat it as unlimited rather than
+    leaving it None, so a restated-unchanged preference compares equal across
+    rounds and search calls don't misread an unset field as a zero cap."""
+    preference = merged.get("preference") or {}
+    if preference.get("max_price_per_ticket") is not None:
+        return merged
+    return {**merged, "preference": {**preference, "max_price_per_ticket": UNLIMITED_PRICE}}
+
+
 def attraction_agent(state: TripState) -> TripState:
     merged, unchanged = resolve_category_constraints(state, "attraction")
+    merged = _fill_unlimited_price(merged)
     existing_itinerary = state.get("itinerary") or []
 
     should_skip = (

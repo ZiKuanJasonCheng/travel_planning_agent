@@ -1,6 +1,57 @@
 import unittest
 
 
+class MergeConstraintsNoneHandlingTests(unittest.TestCase):
+    """A None value in new_constraints means the user gave no constraint for
+    that field this round — it must not blank out an existing value."""
+
+    def test_none_new_value_does_not_overwrite_existing_value(self):
+        from orchestration.merge_constraints import merge_constraints
+        old = {"direct_flights_only": True, "flight_class": "business"}
+        new = {"direct_flights_only": None, "accept_redeye_flights": False}
+        merged = merge_constraints(old, new)
+        self.assertEqual(merged, {
+            "direct_flights_only": True,
+            "flight_class": "business",
+            "accept_redeye_flights": False,
+        })
+
+    def test_none_new_value_over_absent_old_value_stays_absent(self):
+        from orchestration.merge_constraints import merge_constraints
+        old = {"flight_class": "business"}
+        new = {"direct_flights_only": None}
+        merged = merge_constraints(old, new)
+        self.assertNotIn("direct_flights_only", merged)
+
+    def test_non_none_new_value_still_overwrites(self):
+        from orchestration.merge_constraints import merge_constraints
+        old = {"direct_flights_only": True}
+        new = {"direct_flights_only": False}
+        merged = merge_constraints(old, new)
+        self.assertFalse(merged["direct_flights_only"])
+
+    def test_reported_bug_scenario_outbound_direct_flights_preserved(self):
+        """Regression for a reported bug: round 1 sets direct_flights_only=True
+        for outbound only. Round 2's feedback only mentions red-eye flights and
+        flight class; the LLM parser leaves direct_flights_only null for both
+        legs since it wasn't restated. The merge must not reset outbound's
+        True back to a false-y value just because this round's parse carried
+        an explicit null for it."""
+        from orchestration.merge_constraints import merge_constraints
+        existing_outbound = {
+            "airlines": ["Cathay Airlines"], "flight_class": "business",
+            "excluded_airlines": ["JetStar"], "direct_flights_only": True,
+            "max_price_per_ticket": None, "accept_redeye_flights": False,
+            "preferred_departure_timeslots": None,
+        }
+        new_outbound = {
+            "flight_class": "business", "accept_redeye_flights": False,
+            "direct_flights_only": None,
+        }
+        merged = merge_constraints(existing_outbound, new_outbound)
+        self.assertTrue(merged["direct_flights_only"])
+
+
 class ResolveCategoryConstraintsTests(unittest.TestCase):
     def test_new_trip_always_unchanged_false(self):
         """feedback is None (brand-new trip) always forces unchanged=False,

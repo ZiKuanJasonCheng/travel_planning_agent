@@ -1,13 +1,15 @@
 from typing import Optional
 from pydantic import BaseModel, Field
 
+from orchestration.merge_constraints import UNLIMITED_PRICE
+
 
 class FlightPreferenceConstraint(BaseModel):
     airlines: Optional[list[str]] = Field(None, description="Preferred airline(s)")
     flight_class: Optional[str] = Field(None, description="Preferred flight class")
     excluded_airlines: Optional[list[str]] = Field(None, description="Airline(s) to be excluded")
     accept_redeye_flights: Optional[bool] = Field(None, description="Whether to accept red-eye flights (departure 23:30–05:29). Null means not explicitly stated; the agent infers False when preferred_departure_timeslots is set.")
-    direct_flights_only: Optional[bool] = Field(False, description="Whether to only accept direct flights")
+    direct_flights_only: Optional[bool] = Field(None, description="Whether to only accept direct flights. Null means not explicitly stated.")
     preferred_departure_timeslots: Optional[list[str]] = Field(
         None,
         description=(
@@ -20,7 +22,15 @@ class FlightPreferenceConstraint(BaseModel):
             "When the user says they DO want a period, list only those slots."
         ),
     )
-    max_price_per_ticket: Optional[int] = Field(None, description="Maximum acceptable price for a ticket")
+    max_price_per_ticket: Optional[int] = Field(
+        None,
+        description=(
+            "Maximum acceptable price for a ticket, in USD. Leave null when the user simply "
+            "hasn't mentioned a price. If the user explicitly says price doesn't matter or "
+            "there's no budget limit (e.g. 'I don't care about the price', 'any price is fine'), "
+            f"set this to {UNLIMITED_PRICE} instead of null."
+        ),
+    )
 
 
 class RailwayTicketPreferenceConstraint(BaseModel):

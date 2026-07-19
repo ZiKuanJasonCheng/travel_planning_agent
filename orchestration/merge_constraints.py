@@ -1,5 +1,9 @@
 from typing import Dict, TypedDict, List, Optional, Literal
 
+UNLIMITED_PRICE = 1_000_000_000  # Sentinel for "no price cap specified". A real,
+# finite value (unlike float('inf')) so state stays valid, standard JSON once
+# persisted and returned via the API.
+
 
 def merge_constraints(old_constraints: Dict | None, new_constraints: Dict | None) -> Dict | None:
     """
@@ -7,7 +11,10 @@ def merge_constraints(old_constraints: Dict | None, new_constraints: Dict | None
     Rules:
     - If old_constraints is empty or None, we use new_constraints directly
     - If new_constraints is empty or None, we remain old_constraints unchanged
-    - If new_constraints is not empty nor None, we set the new values
+    - If new_constraints is not empty nor None, we set the new values, but only
+      for fields where new_constraints actually provides a value (not None) —
+      None means the user gave no constraint for that field this round, so any
+      existing value for it (or its continued absence) is left untouched.
     """
     # If old_constraints is empty or None, we use new_constraints directly
     if not old_constraints:
@@ -30,8 +37,10 @@ def merge_constraints(old_constraints: Dict | None, new_constraints: Dict | None
         # If new_value and old_value are dictionaries, we merge constraints recursively
         if isinstance(old_value, dict) and isinstance(new_value, dict):
             merged_constraints[key] = merge_constraints(old_value, new_value)
-        else:
+        elif new_value is not None:
             merged_constraints[key] = new_value
+        # else: new_value is None — the user gave no constraint for this field
+        # this round, so keep whatever merged_constraints already has for it.
 
     return merged_constraints
 
