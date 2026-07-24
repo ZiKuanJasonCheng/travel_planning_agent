@@ -159,7 +159,120 @@ class DuffelFlightService:
             self._cache[cache_key] = (time.time(), result)
             return result
 
-        raise NotImplementedError  # replaced by the real API path in Task 4
+        try:
+            slices = [{"origin": origin, "destination": destination, "departure_date": departure_date}]
+            if return_date:
+                slices.append({"origin": destination, "destination": origin, "departure_date": return_date})
+
+            outbound_class = (outbound_preference or {}).get("flight_class")
+            inbound_class = (inbound_preference or {}).get("flight_class")
+            cabin_class = None
+            if outbound_class and (not inbound_class or outbound_class == inbound_class):
+                cabin_class = outbound_class.lower()
+            elif inbound_class and not outbound_class:
+                cabin_class = inbound_class.lower()
+            # If both are set and differ, omit cabin_class — a single request can't express two cabins.
+
+            payload: Dict[str, Any] = {
+                "data": {
+                    "slices": slices,
+                    "passengers": [{"type": "adult"} for _ in range(adults)],
+                }
+            }
+            if cabin_class:
+                payload["data"]["cabin_class"] = cabin_class
+
+            print(f"search_flights(): payload: {payload}")
+            offers = self._request_offers(payload)
+            print(f"search_flights(): len(offers): {len(offers)}")
+
+            flights = []
+            for i, offer in enumerate(offers):
+                if i < 3:
+                    print(f"search_flights(): offer: {offer}")  # Temp
+                candidate = self._parse_offer(offer, outbound_preference, inbound_preference)
+                if candidate:
+                    flights.append(candidate)
+
+            flights.sort(key=lambda x: x.get("price", float("inf")))
+            result = flights
+            self._cache[cache_key] = (time.time(), result)
+            return result
+
+        except error.HTTPError as http_error:
+            print(f"Duffel API Error: {http_error}")
+            return [{"type": "flight", "reason": "Duffel API error"}]
+        except Exception as e:
+            print(f"Error searching flights: {e}")
+            return [{"type": "flight", "reason": "Unknown error"}]
+
+    def _request_offers(self, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+        req = request.Request(
+            f"{DUFFEL_API_BASE_URL}/air/offer_requests?return_offers=true",
+            data=json.dumps(payload).encode("utf-8"),
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Duffel-Version": DUFFEL_API_VERSION,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+        )
+        with request.urlopen(req, timeout=15) as response:
+            body = json.loads(response.read().decode("utf-8"))
+        return ((body.get("data") or {}).get("offers")) or []
+
+    def _parse_offer(
+        self,
+        offer: Dict[str, Any],
+        outbound_preference: Optional[Dict[str, Any]] = None,
+        inbound_preference: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Parse a Duffel offer into a candidate dict with per-leg detail and pricing."""
+        try:
+            slices = offer.get("slices", [])
+            if not slices:
+                return None
+
+            outbound_segments = slices[0].get("segments", [])
+            if not outbound_segments:
+                return None
+            outbound_legs_raw = [_parse_segment(s) for s in outbound_segments]
+
+            inbound_legs_raw = None
+            if len(slices) > 1:
+                inbound_segments = slices[1].get("segments", [])
+                if inbound_segments:
+                    inbound_legs_raw = [_parse_segment(s) for s in inbound_segments]
+
+            total_price = float(offer.get("total_amount", 0) or 0)
+            currency = offer.get("total_currency", "USD")
+
+            if inbound_legs_raw:
+                outbound_total, inbound_total = total_price / 2, total_price / 2
+            else:
+                outbound_total, inbound_total = total_price, None
+
+            outbound_legs = _apply_leg_prices(outbound_legs_raw, outbound_total)
+            inbound_legs = _apply_leg_prices(inbound_legs_raw, inbound_total) if inbound_legs_raw else None
+
+            if not _passes_preference(outbound_legs, outbound_preference):
+                return None
+            if inbound_legs is not None and not _passes_preference(inbound_legs, inbound_preference):
+                return None
+
+            return {
+                "price": int(total_price),
+                "currency": currency,
+                "outbound_legs": outbound_legs,
+                "inbound_legs": inbound_legs,
+                "stops_outbound": len(outbound_legs) - 1,
+                "stops_inbound": (len(inbound_legs) - 1) if inbound_legs else None,
+                "reason": "Duffel API result",
+            }
+        except Exception as e:
+            print(f"Error parsing flight offer: {e}")
+            return None
 
     def _mock_flight_search(
         self,
