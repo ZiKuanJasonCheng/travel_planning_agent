@@ -102,3 +102,141 @@ def _parse_segment(segment: Dict[str, Any]) -> Dict[str, Any]:
         "arrival_time": arrival_at.split("T")[1][:8] if "T" in arrival_at else "",
         "departure_date": depart_at.split("T")[0] if "T" in depart_at else "",
     }
+
+
+class DuffelFlightService:
+    """
+    Service for querying flight information from Duffel API
+    """
+
+    _CACHE_TTL_SECONDS = 900  # 15 minutes
+
+    def __init__(self):
+        api_key = os.getenv("DUFFEL_API_KEY")
+
+        self._cache: Dict[str, Any] = {}
+        self._cache_ttl_seconds = self._CACHE_TTL_SECONDS
+
+        if not api_key:
+            self.api_key = None
+            self.use_mock = True
+            print("Warning: DUFFEL_API_KEY not set. Using mock data.")
+        else:
+            self.api_key = api_key
+            self.use_mock = False
+
+    def search_flights(
+        self,
+        origin: str,
+        destination: str,
+        departure_date: str,
+        return_date: Optional[str] = None,
+        adults: int = 1,
+        outbound_preference: Optional[Dict[str, Any]] = None,
+        inbound_preference: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for flights using Duffel API.
+
+        Returns:
+            List of candidate dicts: {price, currency, outbound_legs, inbound_legs, stops_outbound,
+            stops_inbound, reason}, or a single-item error list on failure.
+        """
+        cache_key = _cache_key(
+            origin=origin, destination=destination, departure_date=departure_date,
+            return_date=return_date, adults=adults,
+            outbound_preference=outbound_preference, inbound_preference=inbound_preference,
+        )
+        cached = self._cache.get(cache_key)
+        if cached and (time.time() - cached[0]) < self._cache_ttl_seconds:
+            return cached[1]
+
+        if self.use_mock:
+            result = self._mock_flight_search(
+                origin, destination, departure_date, return_date,
+                outbound_preference, inbound_preference,
+            )
+            self._cache[cache_key] = (time.time(), result)
+            return result
+
+        raise NotImplementedError  # replaced by the real API path in Task 4
+
+    def _mock_flight_search(
+        self,
+        origin: str,
+        destination: str,
+        departure_date: str,
+        return_date: Optional[str],
+        outbound_preference: Optional[Dict[str, Any]],
+        inbound_preference: Optional[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Mock flight search for development/testing when API credentials are not available."""
+
+        def _leg(airline, frm, to, depart, arrival, date):
+            return {"airline": airline, "from": frm, "to": to, "depart_time": depart,
+                     "arrival_time": arrival, "departure_date": date}
+
+        raw_candidates = [
+            {
+                "price": 500.0, "currency": "USD",
+                "outbound_legs_raw": [_leg("CX", origin, destination, "18:25:00", "22:00:00", departure_date)],
+                "inbound_legs_raw": (
+                    [_leg("CX", destination, origin, "19:00:00", "23:00:00", return_date)] if return_date else None
+                ),
+            },
+            {
+                "price": 400.0, "currency": "USD",
+                "outbound_legs_raw": [
+                    _leg("AA", origin, "XXX", "15:25:00", "16:30:00", departure_date),
+                    _leg("AA", "XXX", destination, "17:00:00", "17:00:00", departure_date),
+                ],
+                "inbound_legs_raw": (
+                    [_leg("AA", destination, origin, "10:00:00", "14:00:00", return_date)] if return_date else None
+                ),
+            },
+        ]
+
+        results = []
+        for c in raw_candidates:
+            outbound_legs_raw = c["outbound_legs_raw"]
+            inbound_legs_raw = c["inbound_legs_raw"]
+            total_price = c["price"]
+
+            if inbound_legs_raw:
+                outbound_total, inbound_total = total_price / 2, total_price / 2
+            else:
+                outbound_total, inbound_total = total_price, None
+
+            outbound_legs = _apply_leg_prices(outbound_legs_raw, outbound_total)
+            inbound_legs = _apply_leg_prices(inbound_legs_raw, inbound_total) if inbound_legs_raw else None
+
+            if not _passes_preference(outbound_legs, outbound_preference):
+                continue
+            if inbound_legs is not None and not _passes_preference(inbound_legs, inbound_preference):
+                continue
+
+            results.append({
+                "price": int(total_price),
+                "currency": c["currency"],
+                "outbound_legs": outbound_legs,
+                "inbound_legs": inbound_legs,
+                "stops_outbound": len(outbound_legs) - 1,
+                "stops_inbound": (len(inbound_legs) - 1) if inbound_legs else None,
+                "reason": "Mock flight data (Duffel API not configured)",
+            })
+
+        return results[:5]
+
+
+# Singleton instance
+_flight_service = None
+
+
+def get_flight_service() -> DuffelFlightService:
+    """
+    Get singleton instance of DuffelFlightService
+    """
+    global _flight_service
+    if _flight_service is None:
+        _flight_service = DuffelFlightService()
+    return _flight_service
