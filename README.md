@@ -15,7 +15,7 @@ POST /trip/start ──► LangGraph StateGraph
            ┌─────────────┼──────────────┬──────────┐
            ▼             ▼              ▼           ▼
       transport    accommodation   attraction   checker
-      (Amadeus      (Amadeus         (LLM       (GPT-4o
+      (Duffel       (Amadeus         (LLM       (GPT-4o
       flights)       hotels)       itinerary)   review)
            └─────────────┼──────────────┴──────────┘
                     ┌────▼────┐
@@ -33,7 +33,7 @@ When an upstream agent changes, all downstream agents are automatically marked d
 ## Features
 
 ### Multi-Agent Workflow (LangGraph)
-- `transport_agent` — searches round-trip flights via Amadeus Flight Offers API; supports configurable number of travelers.
+- `transport_agent` — searches round-trip flights via Duffel's Offer Requests API; supports configurable number of travelers.
 - `accommodation_agent` — searches hotels near destination coordinates (geocoded via Nominatim) using the Amadeus Hotel Search API; filters by nightly price in USD.
 - `attraction_agent` — generates a granular day-by-day itinerary via GPT-4o-mini, taking into account flight arrival/departure times, hotel area, budget, style preferences, and group size.
 - `checker_agent` — reviews the generated itinerary with GPT-4o for repeated venues and unreasonable travel distances; queues a retry (up to 2 times) with an actionable critique; surfaces unresolved issues to the user after max retries.
@@ -41,7 +41,7 @@ When an upstream agent changes, all downstream agents are automatically marked d
 ### Live API Integrations
 | Service | Purpose |
 |---------|---------|
-| Amadeus Flight Offers API | Round-trip flight search |
+| Duffel Offer Requests API | Round-trip flight search |
 | Amadeus Hotel Search API | Hotels by geocoordinate radius |
 | OpenAI GPT-4o-mini | Itinerary generation, style matching, feedback parsing |
 | OpenAI GPT-4o | Itinerary quality review (checker agent) |
@@ -111,7 +111,7 @@ travel_planning_with_agent/
 │   └── tracability.py             # DecisionTrace model + log_trace() helper
 │
 ├── services/
-│   ├── amadeus_flight.py          # Amadeus flight search + mock
+│   ├── duffel_flight.py           # Duffel flight search + mock
 │   ├── amadeus_hotel.py           # Amadeus hotel search by geocode
 │   ├── amadeus_attraction.py      # Amadeus activities (kept, unused)
 │   ├── llm_itinerary_service.py   # GPT-4o-mini itinerary generation
@@ -135,7 +135,8 @@ travel_planning_with_agent/
 ## Requirements
 
 - Python 3.10+
-- Amadeus developer account (free tier works)
+- Duffel developer account (a free test/sandbox API key works for development)
+- Amadeus developer account for hotels/activities only (note: Amadeus discontinued self-service signups for individual developers on 2026-07-17 — `amadeus_hotel.py`/`amadeus_attraction.py` currently depend on it and are affected, pending a future migration; flight search no longer depends on Amadeus)
 - OpenAI API key
 
 **`requirements.txt`:**
@@ -157,6 +158,7 @@ Set the following environment variables before starting the server:
 
 ```bash
 export OPENAI_API_KEY="sk-..."
+export DUFFEL_API_KEY="your-duffel-api-key"
 export AMADEUS_CLIENT_ID="your-amadeus-client-id"
 export AMADEUS_CLIENT_SECRET="your-amadeus-client-secret"
 ```
