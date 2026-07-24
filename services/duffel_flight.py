@@ -85,3 +85,20 @@ def _passes_preference(legs: List[Dict[str, Any]], preference: Optional[Dict[str
 
 def _cache_key(**kwargs) -> str:
     return json.dumps(kwargs, sort_keys=True, default=str)
+
+
+def _parse_segment(segment: Dict[str, Any]) -> Dict[str, Any]:
+    """Parse a single Duffel slice segment into a flat leg dict (no price yet)."""
+    origin = segment.get("origin", {}) or {}
+    destination = segment.get("destination", {}) or {}
+    operating_carrier = segment.get("operating_carrier", {}) or {}
+    depart_at = segment.get("departing_at", "") or ""
+    arrival_at = segment.get("arriving_at", "") or ""
+    return {
+        "airline": operating_carrier.get("iata_code", ""),
+        "from": origin.get("iata_code", ""),
+        "to": destination.get("iata_code", ""),
+        "depart_time": depart_at.split("T")[1][:8] if "T" in depart_at else "",
+        "arrival_time": arrival_at.split("T")[1][:8] if "T" in arrival_at else "",
+        "departure_date": depart_at.split("T")[0] if "T" in depart_at else "",
+    }

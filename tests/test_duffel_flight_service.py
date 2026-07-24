@@ -1,6 +1,6 @@
 import unittest
 
-from services.duffel_flight import _apply_leg_prices, _passes_preference, _cache_key
+from services.duffel_flight import _apply_leg_prices, _passes_preference, _cache_key, _parse_segment
 
 
 class ApplyLegPricesTests(unittest.TestCase):
@@ -70,6 +70,24 @@ class CacheKeyTests(unittest.TestCase):
         key1 = _cache_key(origin="HKG", destination="KIX")
         key2 = _cache_key(origin="HKG", destination="NRT")
         self.assertNotEqual(key1, key2)
+
+
+class ParseSegmentTests(unittest.TestCase):
+    def test_parses_segment_fields(self):
+        segment = {
+            "origin": {"iata_code": "HKG"},
+            "destination": {"iata_code": "TAO"},
+            "departing_at": "2026-09-10T17:30:00",
+            "arriving_at": "2026-09-10T20:40:00",
+            "operating_carrier": {"iata_code": "SC", "name": "Shandong Airlines"},
+        }
+        leg = _parse_segment(segment)
+        self.assertEqual(leg["airline"], "SC")
+        self.assertEqual(leg["from"], "HKG")
+        self.assertEqual(leg["to"], "TAO")
+        self.assertEqual(leg["depart_time"], "17:30:00")
+        self.assertEqual(leg["arrival_time"], "20:40:00")
+        self.assertEqual(leg["departure_date"], "2026-09-10")
 
 
 if __name__ == "__main__":
