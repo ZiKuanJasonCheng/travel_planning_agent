@@ -197,7 +197,7 @@ class SplitCandidatesTests(unittest.TestCase):
 
     def test_all_valid(self):
         from agents.air_ticket import _split_candidates
-        candidates = [{"reason": "Amadeus API result"}, {"reason": "Amadeus API result"}]
+        candidates = [{"reason": "Duffel API result"}, {"reason": "Duffel API result"}]
         valid, has_errors, all_errors = _split_candidates(candidates)
         self.assertEqual(len(valid), 2)
         self.assertFalse(has_errors)
@@ -205,7 +205,7 @@ class SplitCandidatesTests(unittest.TestCase):
 
     def test_all_errors(self):
         from agents.air_ticket import _split_candidates
-        candidates = [{"reason": "Amadeus API error"}, {"reason": "Unknown error"}]
+        candidates = [{"reason": "Duffel API error"}, {"reason": "Unknown error"}]
         valid, has_errors, all_errors = _split_candidates(candidates)
         self.assertEqual(valid, [])
         self.assertTrue(has_errors)
@@ -213,7 +213,7 @@ class SplitCandidatesTests(unittest.TestCase):
 
     def test_mixed(self):
         from agents.air_ticket import _split_candidates
-        candidates = [{"reason": "Amadeus API result"}, {"reason": "Amadeus API error"}]
+        candidates = [{"reason": "Duffel API result"}, {"reason": "Duffel API error"}]
         valid, has_errors, all_errors = _split_candidates(candidates)
         self.assertEqual(len(valid), 1)
         self.assertTrue(has_errors)
@@ -226,7 +226,7 @@ class ResolveOneWayDirectionTests(unittest.TestCase):
             "price": price, "currency": "USD",
             "outbound_legs": [{"airline": airline, "price": price, "depart_time": "10:00:00"}],
             "inbound_legs": None, "stops_outbound": 0, "stops_inbound": None,
-            "reason": "Amadeus API result",
+            "reason": "Duffel API result",
         }
 
     def test_no_candidates_returns_no_results_message(self):
@@ -237,10 +237,10 @@ class ResolveOneWayDirectionTests(unittest.TestCase):
 
     def test_all_errors_returns_error_template(self):
         from agents.air_ticket import _resolve_one_way_direction
-        candidates = [{"reason": "Amadeus API error"}, {"reason": "Unknown error"}]
+        candidates = [{"reason": "Duffel API error"}, {"reason": "Unknown error"}]
         result = _resolve_one_way_direction(candidates, {}, "outbound")
         self.assertEqual(len(result), 1)
-        self.assertIn("Amadeus API error (or unknown error)", result[0]["reason"])
+        self.assertIn("Duffel API error (or unknown error)", result[0]["reason"])
 
     @patch("agents.air_ticket.select_flights")
     def test_normal_selection_uses_llm_index(self, mock_select):
@@ -256,7 +256,7 @@ class ResolveOneWayDirectionTests(unittest.TestCase):
     def test_partial_errors_appends_warning(self, mock_select):
         from agents.air_ticket import _resolve_one_way_direction
         mock_select.return_value = {"round_trip_index": None, "outbound_index": 0, "inbound_index": None, "reason": "Best available"}
-        candidates = [self._candidate(500), {"reason": "Amadeus API error"}]
+        candidates = [self._candidate(500), {"reason": "Duffel API error"}]
         result = _resolve_one_way_direction(candidates, {}, "outbound")
         self.assertIn("Best available", result[0]["reason"])
         self.assertIn("API errors during the run", result[0]["reason"])
@@ -264,7 +264,7 @@ class ResolveOneWayDirectionTests(unittest.TestCase):
     @patch("agents.air_ticket.select_flights")
     def test_inbound_direction_still_reads_outbound_legs_key(self, mock_select):
         """One-way search candidates always store their single leg list under "outbound_legs",
-        even when the caller is searching the inbound direction (Amadeus doesn't know about our
+        even when the caller is searching the inbound direction (Duffel doesn't know about our
         outbound/inbound relabeling for one-way calls). This locks in that behavior."""
         from agents.air_ticket import _resolve_one_way_direction
         mock_select.return_value = {"round_trip_index": None, "outbound_index": None, "inbound_index": 0, "reason": "Only option"}
@@ -282,7 +282,7 @@ class ResolveRoundTripTests(unittest.TestCase):
             "outbound_legs": [{"airline": "CX", "price": price / 2, "depart_time": "10:00:00"}],
             "inbound_legs": [{"airline": "CX", "price": price / 2, "depart_time": "19:00:00"}],
             "stops_outbound": 0, "stops_inbound": 0,
-            "reason": "Amadeus API result",
+            "reason": "Duffel API result",
         }
 
     def test_empty_candidates_returns_none(self):
@@ -291,7 +291,7 @@ class ResolveRoundTripTests(unittest.TestCase):
 
     def test_all_errors_returns_none(self):
         from agents.air_ticket import _resolve_round_trip
-        candidates = [{"reason": "Amadeus API error"}]
+        candidates = [{"reason": "Duffel API error"}]
         self.assertIsNone(_resolve_round_trip(candidates))
 
     @patch("agents.air_ticket.select_flights")
@@ -343,7 +343,7 @@ class AirTicketAgentIntegrationTests(unittest.TestCase):
             "outbound_legs": [{"airline": "CX", "price": price / 2, "depart_time": "10:00:00", "arrival_time": "14:00:00"}],
             "inbound_legs": [{"airline": "CX", "price": price / 2, "depart_time": "19:00:00", "arrival_time": "23:00:00"}],
             "stops_outbound": 0, "stops_inbound": 0,
-            "reason": "Amadeus API result",
+            "reason": "Duffel API result",
         }
 
     @patch("agents.air_ticket.select_flights")
@@ -409,8 +409,8 @@ class AirTicketAgentIntegrationTests(unittest.TestCase):
     def test_all_error_tier_produces_templated_message(self, mock_get_svc, mock_select):
         mock_svc = MagicMock()
         mock_svc.search_flights.side_effect = [
-            [{"type": "flight", "reason": "Amadeus API error"}],  # round trip
-            [{"type": "flight", "reason": "Amadeus API error"}],  # outbound fallback
+            [{"type": "flight", "reason": "Duffel API error"}],  # round trip
+            [{"type": "flight", "reason": "Duffel API error"}],  # outbound fallback
             [{"type": "flight", "reason": "Unknown error"}],      # inbound fallback
         ]
         mock_get_svc.return_value = mock_svc
@@ -420,8 +420,8 @@ class AirTicketAgentIntegrationTests(unittest.TestCase):
 
         mock_select.assert_not_called()
         flight = new_state["transport_options"]["flight"]
-        self.assertIn("Amadeus API error (or unknown error)", flight["outbound"][0]["reason"])
-        self.assertIn("Amadeus API error (or unknown error)", flight["inbound"][0]["reason"])
+        self.assertIn("Duffel API error (or unknown error)", flight["outbound"][0]["reason"])
+        self.assertIn("Duffel API error (or unknown error)", flight["inbound"][0]["reason"])
 
     @patch("agents.air_ticket.get_flight_service")
     def test_unhandled_exception_produces_symmetric_error_message(self, mock_get_svc):
@@ -438,8 +438,8 @@ class AirTicketAgentIntegrationTests(unittest.TestCase):
         flight = new_state["transport_options"]["flight"]
         self.assertEqual(len(flight["outbound"]), 1)
         self.assertEqual(len(flight["inbound"]), 1)
-        self.assertIn("Amadeus API error (or unknown error)", flight["outbound"][0]["reason"])
-        self.assertIn("Amadeus API error (or unknown error)", flight["inbound"][0]["reason"])
+        self.assertIn("Duffel API error (or unknown error)", flight["outbound"][0]["reason"])
+        self.assertIn("Duffel API error (or unknown error)", flight["inbound"][0]["reason"])
 
     @patch("agents.air_ticket.get_flight_service")
     def test_rerun_planning_is_reset_after_use(self, mock_get_svc):

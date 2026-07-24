@@ -1,6 +1,6 @@
 """
 Air Ticket Agent - Sub-agent for handling flight ticket searches
-Uses Amadeus API to search for real flight options
+Uses Duffel API to search for real flight options
 """
 from copy import deepcopy
 from datetime import datetime, timedelta
@@ -9,13 +9,13 @@ from typing import Optional
 from states.trip_state import TripState, default_transport_options
 from orchestration.tracability import log_trace
 from orchestration.merge_constraints import merge_constraints, UNLIMITED_PRICE
-from services.amadeus_flight import AmadeusFlightService, get_flight_service
+from services.duffel_flight import DuffelFlightService, get_flight_service
 from services.airline_iata_resolver import resolve_airline_iata_codes
 from services.city_iata_resolver import resolve_city_iata_codes
 from services.llm_flight_selector_service import select_flights
 
 
-_ERROR_REASONS = {"Amadeus API error", "Unknown error"}
+_ERROR_REASONS = {"Duffel API error", "Unknown error"}
 
 _NO_RESULTS_MESSAGE = {
     "reason": "No suitable flights were found. Please change your flight preferences and submit feedback again."
@@ -23,7 +23,7 @@ _NO_RESULTS_MESSAGE = {
 
 _ERROR_MESSAGE = {
     "reason": (
-        "There's an Amadeus API error (or unknown error) at the moment. "
+        "There's a Duffel API error (or unknown error) at the moment. "
         "Please wait for a few minutes and submit a feedback saying "
         "'Run transport/flight service again'."
     )
@@ -65,7 +65,7 @@ def _fill_unlimited_price(merged_transport: dict) -> dict:
     """If a direction already has a preference but no round has ever set a
     price cap for it, treat the cap as unlimited rather than leaving it None,
     so a restated-unchanged preference compares equal across rounds and the
-    Amadeus search doesn't misread an unset field as a zero cap. A direction
+    Duffel search doesn't misread an unset field as a zero cap. A direction
     with no preference at all is left untouched — synthesizing a price-only
     preference dict out of nothing would falsely register as a change for
     that direction in _search_mode's per-direction comparison."""
@@ -215,7 +215,7 @@ def _calculate_return_date(state: TripState, days: int) -> Optional[str]:
 
 
 def _search_all_combos(
-    flight_service: AmadeusFlightService,
+    flight_service: DuffelFlightService,
     origin_codes: list,
     dest_codes: list,
     departure_date: str,
@@ -236,7 +236,7 @@ def _search_all_combos(
 
 
 def _search_one_way_pair(
-    flight_service: AmadeusFlightService,
+    flight_service: DuffelFlightService,
     origin_codes: list,
     dest_codes: list,
     departure_date: str,
@@ -260,7 +260,7 @@ def _search_one_way_pair(
 def air_ticket_agent(state: TripState) -> TripState:
     """
     Sub-agent for searching and recommending air ticket options.
-    Uses Amadeus API to find real flight options, split by outbound/inbound direction.
+    Uses Duffel API to find real flight options, split by outbound/inbound direction.
     """
     destination = state.get("destination", "")
     days = state.get("days", 1)
