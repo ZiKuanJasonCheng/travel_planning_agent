@@ -10,6 +10,7 @@ from typing import Optional, List, Dict, Any
 from urllib import error, request
 
 from services.currency import to_usd
+from services.geocoding import fetch_coordinates
 
 DUFFEL_API_BASE_URL = "https://api.duffel.com"
 DUFFEL_API_VERSION = "v2"
@@ -132,7 +133,69 @@ class DuffelHotelService:
             self._cache[cache_key] = (time.time(), result)
             return result
 
-        raise NotImplementedError  # replaced by the real API path in Task 4
+        try:
+            coords = fetch_coordinates(destination)
+            if coords is None:
+                result = []
+                self._cache[cache_key] = (time.time(), result)
+                return result
+            lat, lon = coords
+
+            nights = _nights(check_in, check_out)
+            payload: Dict[str, Any] = {
+                "data": {
+                    "rooms": room_quantity,
+                    "check_in_date": check_in,
+                    "check_out_date": check_out,
+                    "guests": [{"type": "adult"} for _ in range(adults)],
+                    "location": {
+                        "radius": 5,
+                        "geographic_coordinates": {"latitude": lat, "longitude": lon},
+                    },
+                }
+            }
+
+            print(f"search_hotels(): payload: {payload}")
+            raw_results = self._request_search(payload)
+            print(f"search_hotels(): len(raw_results): {len(raw_results)}")
+
+            hotels = []
+            for item in raw_results:
+                hotel = _parse_search_result(item, nights)
+                if hotel is None:
+                    continue
+                nightly_usd = to_usd(hotel["price_per_night"], hotel["currency"])
+                if not _passes_hotel_filters(nightly_usd, hotel["area"], max_price_per_night, preferred_area):
+                    continue
+                hotels.append(hotel)
+
+            hotels.sort(key=lambda item: item.get("price_per_night", 10**9))
+            result = hotels[:5]
+            self._cache[cache_key] = (time.time(), result)
+            return result
+
+        except error.HTTPError as http_error:
+            print(f"Duffel Hotel API Error: {http_error}")
+            return [{"reason": "Duffel Hotel API error"}]
+        except Exception as e:
+            print(f"Error searching hotels: {e}")
+            return [{"reason": "Unknown error"}]
+
+    def _request_search(self, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+        req = request.Request(
+            f"{DUFFEL_API_BASE_URL}/stays/search",
+            data=json.dumps(payload).encode("utf-8"),
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Duffel-Version": DUFFEL_API_VERSION,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+        )
+        with request.urlopen(req, timeout=15) as response:
+            body = json.loads(response.read().decode("utf-8"))
+        return ((body.get("data") or {}).get("results")) or []
 
     def _mock_hotel_search(
         self,

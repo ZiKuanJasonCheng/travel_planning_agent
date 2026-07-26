@@ -1,4 +1,7 @@
+import json
 import unittest
+from unittest.mock import MagicMock, patch
+from urllib import error as urllib_error
 
 from services.duffel_hotel import _default_check_in_date, _default_check_out_date, _nights, _passes_hotel_filters, _cache_key, _parse_search_result, DuffelHotelService
 
@@ -140,6 +143,126 @@ class GetDuffelHotelServiceTests(unittest.TestCase):
         first = module.get_duffel_hotel_service()
         second = module.get_duffel_hotel_service()
         self.assertIs(first, second)
+
+
+class SearchHotelsTests(unittest.TestCase):
+    def _service(self):
+        from services.duffel_hotel import DuffelHotelService
+        service = DuffelHotelService.__new__(DuffelHotelService)
+        service.use_mock = False
+        service.api_key = "test-key"
+        service._cache = {}
+        service._cache_ttl_seconds = 900
+        return service
+
+    def _mock_http_response(self, body: dict):
+        resp = MagicMock()
+        resp.read.return_value = json.dumps(body).encode("utf-8")
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = MagicMock(return_value=False)
+        return resp
+
+    def _search_result(self, total_amount="480.00"):
+        return {
+            "cheapest_rate_total_amount": total_amount,
+            "cheapest_rate_currency": "USD",
+            "accommodation": {
+                "id": "acc_0000123",
+                "name": "Shinjuku Grand Hotel",
+                "location": {
+                    "address": {"city_name": "Tokyo"},
+                    "geographic_coordinates": {"latitude": 35.6938, "longitude": 139.7034},
+                },
+            },
+        }
+
+    @patch("services.duffel_hotel.fetch_coordinates")
+    @patch("urllib.request.urlopen")
+    def test_search_hotels_returns_parsed_and_priced_result(self, mock_urlopen, mock_coords):
+        mock_coords.return_value = (35.6895, 139.6917)
+        mock_urlopen.return_value = self._mock_http_response(
+            {"data": {"results": [self._search_result()], "created_at": "2026-07-25T00:00:00Z"}}
+        )
+        service = self._service()
+
+        result = service.search_hotels(
+            destination="Tokyo", check_in_date="2026-09-10", check_out_date="2026-09-14",
+        )
+
+        self.assertEqual(len(result), 1)
+        hotel = result[0]
+        self.assertEqual(hotel["name"], "Shinjuku Grand Hotel")
+        self.assertEqual(hotel["price_per_night"], 120)
+        self.assertEqual(hotel["supplier"], "duffel")
+
+        # Cache populated
+        self.assertEqual(len(service._cache), 1)
+
+    @patch("services.duffel_hotel.fetch_coordinates")
+    def test_geocode_failure_returns_empty_list(self, mock_coords):
+        mock_coords.return_value = None
+        service = self._service()
+
+        result = service.search_hotels(
+            destination="Nowhereville", check_in_date="2026-09-10", check_out_date="2026-09-14",
+        )
+        self.assertEqual(result, [])
+
+    @patch("services.duffel_hotel.fetch_coordinates")
+    @patch("urllib.request.urlopen")
+    def test_http_error_returns_duffel_hotel_error_reason(self, mock_urlopen, mock_coords):
+        mock_coords.return_value = (35.6895, 139.6917)
+        mock_urlopen.side_effect = urllib_error.HTTPError(
+            url="https://api.duffel.com/stays/search", code=401, msg="Unauthorized", hdrs=None, fp=None,
+        )
+        service = self._service()
+
+        result = service.search_hotels(
+            destination="Tokyo", check_in_date="2026-09-10", check_out_date="2026-09-14",
+        )
+        self.assertEqual(result, [{"reason": "Duffel Hotel API error"}])
+
+    @patch("services.duffel_hotel.fetch_coordinates")
+    def test_unexpected_error_returns_unknown_error_reason(self, mock_coords):
+        mock_coords.side_effect = ValueError("boom")
+        service = self._service()
+
+        result = service.search_hotels(
+            destination="Tokyo", check_in_date="2026-09-10", check_out_date="2026-09-14",
+        )
+        self.assertEqual(result, [{"reason": "Unknown error"}])
+
+    @patch("services.duffel_hotel.fetch_coordinates")
+    @patch("urllib.request.urlopen")
+    def test_max_price_filters_out_expensive_hotel(self, mock_urlopen, mock_coords):
+        mock_coords.return_value = (35.6895, 139.6917)
+        mock_urlopen.return_value = self._mock_http_response(
+            {"data": {"results": [self._search_result(total_amount="480.00")], "created_at": "2026-07-25T00:00:00Z"}}
+        )
+        service = self._service()
+
+        result = service.search_hotels(
+            destination="Tokyo", check_in_date="2026-09-10", check_out_date="2026-09-14",
+            max_price_per_night=100,
+        )
+        self.assertEqual(result, [])
+
+    @patch("services.duffel_hotel.fetch_coordinates")
+    @patch("urllib.request.urlopen")
+    def test_cache_hit_returns_cached_result_without_calling_api_again(self, mock_urlopen, mock_coords):
+        mock_coords.return_value = (35.6895, 139.6917)
+        mock_urlopen.return_value = self._mock_http_response(
+            {"data": {"results": [self._search_result()], "created_at": "2026-07-25T00:00:00Z"}}
+        )
+        service = self._service()
+        kwargs = dict(destination="Tokyo", check_in_date="2026-09-10", check_out_date="2026-09-14")
+
+        first_result = service.search_hotels(**kwargs)
+        second_result = service.search_hotels(**kwargs)
+
+        # The real HTTP call must only be hit once - the second call is served from self._cache.
+        self.assertEqual(mock_urlopen.call_count, 1)
+        self.assertEqual(first_result, second_result)
 
 
 if __name__ == "__main__":
