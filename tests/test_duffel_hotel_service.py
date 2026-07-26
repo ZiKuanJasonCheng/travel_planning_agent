@@ -1,6 +1,6 @@
 import unittest
 
-from services.duffel_hotel import _default_check_in_date, _default_check_out_date, _nights, _passes_hotel_filters, _cache_key, _parse_search_result
+from services.duffel_hotel import _default_check_in_date, _default_check_out_date, _nights, _passes_hotel_filters, _cache_key, _parse_search_result, DuffelHotelService
 
 
 class DefaultDatesTests(unittest.TestCase):
@@ -91,6 +91,55 @@ class ParseSearchResultTests(unittest.TestCase):
         result["accommodation"]["location"] = {}
         hotel = _parse_search_result(result, nights=4)
         self.assertEqual(hotel["area"], "unknown area")
+
+
+class MockHotelSearchTests(unittest.TestCase):
+    def _service(self):
+        service = DuffelHotelService.__new__(DuffelHotelService)
+        service.use_mock = True
+        service.api_key = None
+        service._cache = {}
+        service._cache_ttl_seconds = 900
+        return service
+
+    def test_mock_search_returns_priced_hotels(self):
+        service = self._service()
+        result = service.search_hotels(
+            destination="Tokyo", check_in_date="2026-09-10", check_out_date="2026-09-14",
+        )
+        self.assertGreater(len(result), 0)
+        for hotel in result:
+            self.assertIn("price_per_night", hotel)
+            self.assertEqual(hotel["supplier"], "duffel")
+
+    def test_mock_search_respects_max_price_per_night(self):
+        service = self._service()
+        result = service.search_hotels(
+            destination="Tokyo", check_in_date="2026-09-10", check_out_date="2026-09-14",
+            max_price_per_night=100,
+        )
+        self.assertGreater(len(result), 0)
+        for hotel in result:
+            self.assertLessEqual(hotel["price_per_night"], 100)
+
+    def test_mock_search_respects_preferred_area(self):
+        service = self._service()
+        result = service.search_hotels(
+            destination="Tokyo", check_in_date="2026-09-10", check_out_date="2026-09-14",
+            preferred_area="riverside",
+        )
+        self.assertGreater(len(result), 0)
+        for hotel in result:
+            self.assertIn("riverside", hotel["area"].lower())
+
+
+class GetDuffelHotelServiceTests(unittest.TestCase):
+    def test_returns_singleton(self):
+        import services.duffel_hotel as module
+        module._hotel_service = None
+        first = module.get_duffel_hotel_service()
+        second = module.get_duffel_hotel_service()
+        self.assertIs(first, second)
 
 
 if __name__ == "__main__":
