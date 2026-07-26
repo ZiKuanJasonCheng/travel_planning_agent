@@ -42,3 +42,34 @@ def _passes_hotel_filters(
 
 def _cache_key(**kwargs) -> str:
     return json.dumps(kwargs, sort_keys=True, default=str)
+
+
+def _parse_search_result(result: Dict[str, Any], nights: int) -> Optional[Dict[str, Any]]:
+    """Parse a single Duffel Stays search result into a flat hotel dict (no filtering yet)."""
+    total_price = result.get("cheapest_rate_total_amount")
+    if total_price is None:
+        return None
+    try:
+        total_price = float(total_price)
+    except (TypeError, ValueError):
+        return None
+
+    currency = result.get("cheapest_rate_currency") or "USD"
+    accommodation = result.get("accommodation") or {}
+    location = accommodation.get("location") or {}
+    address = location.get("address") or {}
+    coordinates = location.get("geographic_coordinates") or {}
+    area = address.get("city_name") or address.get("region") or "unknown area"
+
+    return {
+        "type": "hotel",
+        "name": accommodation.get("name") or "Unknown Hotel",
+        "price_per_night": int(total_price / nights) if total_price > 0 else 0,
+        "currency": currency,
+        "area": area,
+        "hotel_id": accommodation.get("id"),
+        "lat": coordinates.get("latitude"),
+        "lon": coordinates.get("longitude"),
+        "supplier": "duffel",
+        "reason": "Duffel Stays offer",
+    }

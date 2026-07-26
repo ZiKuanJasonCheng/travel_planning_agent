@@ -1,6 +1,6 @@
 import unittest
 
-from services.duffel_hotel import _default_check_in_date, _default_check_out_date, _nights, _passes_hotel_filters, _cache_key
+from services.duffel_hotel import _default_check_in_date, _default_check_out_date, _nights, _passes_hotel_filters, _cache_key, _parse_search_result
 
 
 class DefaultDatesTests(unittest.TestCase):
@@ -43,6 +43,54 @@ class CacheKeyTests(unittest.TestCase):
         key1 = _cache_key(destination="Tokyo")
         key2 = _cache_key(destination="Kyoto")
         self.assertNotEqual(key1, key2)
+
+
+class ParseSearchResultTests(unittest.TestCase):
+    def _result(self, **overrides):
+        base = {
+            "cheapest_rate_total_amount": "480.00",
+            "cheapest_rate_currency": "USD",
+            "accommodation": {
+                "id": "acc_0000123",
+                "name": "Shinjuku Grand Hotel",
+                "location": {
+                    "address": {"city_name": "Tokyo", "region": "Kanto"},
+                    "geographic_coordinates": {"latitude": 35.6938, "longitude": 139.7034},
+                },
+            },
+        }
+        base.update(overrides)
+        return base
+
+    def test_parses_fields_and_derives_nightly_price(self):
+        hotel = _parse_search_result(self._result(), nights=4)
+        self.assertEqual(hotel["type"], "hotel")
+        self.assertEqual(hotel["name"], "Shinjuku Grand Hotel")
+        self.assertEqual(hotel["price_per_night"], 120)
+        self.assertEqual(hotel["currency"], "USD")
+        self.assertEqual(hotel["area"], "Tokyo")
+        self.assertEqual(hotel["hotel_id"], "acc_0000123")
+        self.assertEqual(hotel["lat"], 35.6938)
+        self.assertEqual(hotel["lon"], 139.7034)
+        self.assertEqual(hotel["supplier"], "duffel")
+        self.assertEqual(hotel["reason"], "Duffel Stays offer")
+
+    def test_missing_price_returns_none(self):
+        result = self._result()
+        del result["cheapest_rate_total_amount"]
+        self.assertIsNone(_parse_search_result(result, nights=4))
+
+    def test_missing_city_name_falls_back_to_region(self):
+        result = self._result()
+        result["accommodation"]["location"]["address"] = {"region": "Kanto"}
+        hotel = _parse_search_result(result, nights=4)
+        self.assertEqual(hotel["area"], "Kanto")
+
+    def test_missing_address_falls_back_to_unknown_area(self):
+        result = self._result()
+        result["accommodation"]["location"] = {}
+        hotel = _parse_search_result(result, nights=4)
+        self.assertEqual(hotel["area"], "unknown area")
 
 
 if __name__ == "__main__":
