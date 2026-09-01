@@ -15,7 +15,7 @@ POST /trip/start ──► LangGraph StateGraph
            ┌─────────────┼──────────────┬──────────┐
            ▼             ▼              ▼           ▼
       transport    accommodation   attraction   checker
-      (Duffel       (Amadeus         (LLM       (GPT-4o
+      (Duffel       (Duffel          (LLM       (GPT-4o
       flights)       hotels)       itinerary)   review)
            └─────────────┼──────────────┴──────────┘
                     ┌────▼────┐
@@ -34,7 +34,7 @@ When an upstream agent changes, all downstream agents are automatically marked d
 
 ### Multi-Agent Workflow (LangGraph)
 - `transport_agent` — searches round-trip flights via Duffel's Offer Requests API; supports configurable number of travelers.
-- `accommodation_agent` — searches hotels near destination coordinates (geocoded via Nominatim) using the Amadeus Hotel Search API; filters by nightly price in USD.
+- `accommodation_agent` — searches hotels near destination coordinates (geocoded via Nominatim) using the Duffel Stays API; filters by nightly price in USD.
 - `attraction_agent` — generates a granular day-by-day itinerary via GPT-4o-mini, taking into account flight arrival/departure times, hotel area, budget, style preferences, and group size.
 - `checker_agent` — reviews the generated itinerary with GPT-4o for repeated venues and unreasonable travel distances; queues a retry (up to 2 times) with an actionable critique; surfaces unresolved issues to the user after max retries.
 
@@ -42,7 +42,7 @@ When an upstream agent changes, all downstream agents are automatically marked d
 | Service | Purpose |
 |---------|---------|
 | Duffel Offer Requests API | Round-trip flight search |
-| Amadeus Hotel Search API | Hotels by geocoordinate radius |
+| Duffel Stays API | Hotels by geocoordinate radius |
 | OpenAI GPT-4o-mini | Itinerary generation, style matching, feedback parsing |
 | OpenAI GPT-4o | Itinerary quality review (checker agent) |
 | Nominatim (OpenStreetMap) | City → latitude/longitude geocoding; geocoding fallback for airport resolution |
@@ -74,10 +74,6 @@ When an upstream agent changes, all downstream agents are automatically marked d
 - On failure, the critique is fed back to `attraction_agent` for up to 2 retry cycles.
 - If issues remain after max retries, they are surfaced to the user via `checker_critique` in the response state.
 
-### Resilient Hotel ID Fetching
-- Amadeus hotel offers API occasionally returns errors for invalid hotel IDs.
-- `_fetch_offers_resilient()` parses bad IDs from the error message and retries with the remaining valid IDs until all are exhausted.
-
 ---
 
 ## Project Structure
@@ -92,8 +88,8 @@ travel_planning_with_agent/
 │   └── apis.py                    # /trip/start and /trip/feedback endpoints
 │
 ├── agents/
-│   ├── transport.py               # Calls amadeus_flight.py
-│   ├── accommodation.py           # Calls amadeus_hotel.py
+│   ├── transport.py               # Calls air_ticket.py (Duffel flights)
+│   ├── accommodation.py           # Calls duffel_hotel.py
 │   ├── attraction.py              # Calls llm_itinerary_service.py
 │   ├── checker.py                 # Itinerary quality review; retries via attraction_agent
 │   ├── air_ticket.py              # Flight search logic
@@ -112,15 +108,13 @@ travel_planning_with_agent/
 │
 ├── services/
 │   ├── duffel_flight.py           # Duffel flight search + mock
-│   ├── amadeus_hotel.py           # Amadeus hotel search by geocode
-│   ├── amadeus_attraction.py      # Amadeus activities (kept, unused)
+│   ├── duffel_hotel.py            # Duffel Stays hotel search + mock
 │   ├── llm_itinerary_service.py   # GPT-4o-mini itinerary generation
 │   ├── llm_checker_service.py     # GPT-4o itinerary quality evaluation
 │   ├── geocoding.py               # Nominatim city → (lat, lon)
 │   ├── city_iata_resolver.py      # City name → IATA code(s) via OurAirports + geocoding fallback
 │   ├── airline_iata_resolver.py   # Airline IATA helpers
-│   ├── currency.py                # Frankfurter real-time USD rates
-│   └── booking_hotel.py
+│   └── currency.py                # Frankfurter real-time USD rates
 │
 └── states/
     ├── trip_state.py              # TripState TypedDict (shared state)
@@ -136,7 +130,6 @@ travel_planning_with_agent/
 
 - Python 3.10+
 - Duffel developer account (a free test/sandbox API key works for development)
-- Amadeus developer account for hotels/activities only (note: Amadeus discontinued self-service signups for individual developers on 2026-07-17 — `amadeus_hotel.py`/`amadeus_attraction.py` currently depend on it and are affected, pending a future migration; flight search no longer depends on Amadeus)
 - OpenAI API key
 
 **`requirements.txt`:**
@@ -147,7 +140,6 @@ langgraph
 openai
 pydantic
 starlette
-amadeus
 ```
 
 ---
@@ -159,8 +151,6 @@ Set the following environment variables before starting the server:
 ```bash
 export OPENAI_API_KEY="sk-..."
 export DUFFEL_API_KEY="your-duffel-api-key"
-export AMADEUS_CLIENT_ID="your-amadeus-client-id"
-export AMADEUS_CLIENT_SECRET="your-amadeus-client-secret"
 ```
 
 > **Never hardcode API keys in source files.** The Frankfurter currency API requires no key.
@@ -285,6 +275,5 @@ The LLM parses the feedback into structured constraints, merges them into the se
 ## Notes
 
 - This is a **reference implementation**, not production-ready. Authentication, rate limiting, and persistent storage are intentionally minimal.
-- The `amadeus_attraction.py` service is retained but not actively used — attraction planning is handled by the LLM itinerary service.
-- Hotel price filtering compares nightly price (total price ÷ rooms ÷ nights) converted to USD against the `max_price_per_night` constraint.
+- Hotel price filtering compares nightly price (total price ÷ nights) converted to USD against the `max_price_per_night` constraint.
 - Flight search uses IATA airport codes. `city_iata_resolver.py` resolves city names to codes via OurAirports (filtered to `scheduled_service = yes`) with a Nominatim + haversine geocoding fallback for cities not directly matched. Non-commercial airports (military bases, private fields) are excluded regardless of their size classification.
