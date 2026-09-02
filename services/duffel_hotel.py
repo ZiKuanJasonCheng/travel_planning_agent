@@ -144,6 +144,10 @@ class DuffelHotelService:
             nights = _nights(check_in, check_out)
             payload: Dict[str, Any] = {
                 "data": {
+                    # room_quantity is sent to Duffel for the search itself, but
+                    # price_per_night below is total/nights only (no room division) —
+                    # a known simplification vs. Amadeus's total/(rooms*nights);
+                    # see the design spec's Out of Scope section.
                     "rooms": room_quantity,
                     "check_in_date": check_in,
                     "check_out_date": check_out,
@@ -251,3 +255,16 @@ def get_duffel_hotel_service() -> DuffelHotelService:
     if _hotel_service is None:
         _hotel_service = DuffelHotelService()
     return _hotel_service
+
+
+if __name__ == "__main__":
+    test_hotel_service = get_duffel_hotel_service()
+    results = test_hotel_service.search_hotels(
+        destination="Osaka",
+        check_in_date="2026-09-10",
+        check_out_date="2026-09-17",
+        adults=2,
+        room_quantity=1,
+        max_price_per_night=300,
+    )
+    print(f"results: {results}")
