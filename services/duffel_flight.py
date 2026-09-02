@@ -353,3 +353,26 @@ def get_flight_service() -> DuffelFlightService:
     if _flight_service is None:
         _flight_service = DuffelFlightService()
     return _flight_service
+
+
+if __name__ == "__main__":
+    test_flight_service = get_flight_service()
+    results = test_flight_service.search_flights(
+        origin="HKG",
+        destination="KIX",
+        departure_date="2026-09-10",
+        return_date="2026-09-17",
+        adults=1,
+        outbound_preference={
+            "flight_class": "business",
+            "accept_redeye_flights": False,
+            "direct_flights_only": True,
+            "max_price_per_ticket": 5000
+        },
+        inbound_preference={
+            "accept_redeye_flights": False,
+            "direct_flights_only": True,
+            "max_price_per_ticket": 2500
+        },
+    )
+    print(f"results: {results}")

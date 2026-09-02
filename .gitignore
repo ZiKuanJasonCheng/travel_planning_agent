@@ -7,3 +7,4 @@ __pycache__
 test_logs
 *_old.py
 openspec
+docs/
