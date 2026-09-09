@@ -1,16 +1,16 @@
 from states.trip_state import TripState
 from orchestration.tracability import log_trace
 from orchestration.merge_constraints import resolve_category_constraints, UNLIMITED_PRICE
-from services.duffel_hotel import get_duffel_hotel_service
+from services.stayingapi_hotel import get_stayingapi_hotel_service
 from copy import deepcopy
 from datetime import datetime, timedelta
 
 
-_ERROR_REASONS = {"Duffel Hotel API error", "Unknown error"}
+_ERROR_REASONS = {"StayingAPI Hotel API error", "Unknown error"}
 
 _ERROR_MESSAGE = {
     "reason": (
-        "There's a Duffel Hotel API error (or unknown error) at the moment. "
+        "There's a StayingAPI Hotel API error (or unknown error) at the moment. "
         "Please wait for a few minutes and submit a feedback saying "
         "'Run accommodation service again'."
     )
@@ -74,7 +74,7 @@ def accommodation_agent(state: TripState) -> TripState:
     print(f"accommodation_agent(): max_price_per_night: {max_price_per_night}, preferred_area: {preferred_area}, check_in_date: {check_in_date}, check_out_date: {check_out_date}")
 
     num_people = state.get("num_people") or 1
-    hotel_service = get_duffel_hotel_service()
+    hotel_service = get_stayingapi_hotel_service()
     hotels = hotel_service.search_hotels(
         destination=destination,
         check_in_date=check_in_date,

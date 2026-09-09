@@ -15,8 +15,8 @@ POST /trip/start ──► LangGraph StateGraph
            ┌─────────────┼──────────────┬──────────┐
            ▼             ▼              ▼           ▼
       transport    accommodation   attraction   checker
-      (Duffel       (Duffel          (LLM       (GPT-4o
-      flights)       hotels)       itinerary)   review)
+      (Duffel      (StayingAPI      (LLM       (GPT-4o
+      flights)       hotels)      itinerary)   review)
            └─────────────┼──────────────┴──────────┘
                     ┌────▼────┐
                     │ human   │  ◄── POST /trip/feedback
@@ -34,7 +34,7 @@ When an upstream agent changes, all downstream agents are automatically marked d
 
 ### Multi-Agent Workflow (LangGraph)
 - `transport_agent` — searches round-trip flights via Duffel's Offer Requests API; supports configurable number of travelers.
-- `accommodation_agent` — searches hotels near destination coordinates (geocoded via Nominatim) using the Duffel Stays API; filters by nightly price in USD.
+- `accommodation_agent` — searches hotels near destination coordinates (geocoded via Nominatim) using ~~the Duffel Stays API~~ (now dormant — account lacks Stays access) StayingAPI's hotel search (free-text destination, no geocoding needed); filters by nightly price in USD.
 - `attraction_agent` — generates a granular day-by-day itinerary via GPT-4o-mini, taking into account flight arrival/departure times, hotel area, budget, style preferences, and group size.
 - `checker_agent` — reviews the generated itinerary with GPT-4o for repeated venues and unreasonable travel distances; queues a retry (up to 2 times) with an actionable critique; surfaces unresolved issues to the user after max retries.
 
@@ -42,7 +42,7 @@ When an upstream agent changes, all downstream agents are automatically marked d
 | Service | Purpose |
 |---------|---------|
 | Duffel Offer Requests API | Round-trip flight search |
-| Duffel Stays API | Hotels by geocoordinate radius |
+| ~~Duffel Stays API~~ StayingAPI | Hotels by destination name (dormant Duffel Stays code kept in repo, unused) |
 | OpenAI GPT-4o-mini | Itinerary generation, style matching, feedback parsing |
 | OpenAI GPT-4o | Itinerary quality review (checker agent) |
 | Nominatim (OpenStreetMap) | City → latitude/longitude geocoding; geocoding fallback for airport resolution |
@@ -89,7 +89,7 @@ travel_planning_with_agent/
 │
 ├── agents/
 │   ├── transport.py               # Calls air_ticket.py (Duffel flights)
-│   ├── accommodation.py           # Calls duffel_hotel.py
+│   ├── accommodation.py           # Calls stayingapi_hotel.py (~~was duffel_hotel.py~~, now dormant)
 │   ├── attraction.py              # Calls llm_itinerary_service.py
 │   ├── checker.py                 # Itinerary quality review; retries via attraction_agent
 │   ├── air_ticket.py              # Flight search logic
@@ -108,7 +108,8 @@ travel_planning_with_agent/
 │
 ├── services/
 │   ├── duffel_flight.py           # Duffel flight search + mock
-│   ├── duffel_hotel.py            # Duffel Stays hotel search + mock
+│   ├── ~~duffel_hotel.py            # Duffel Stays hotel search + mock~~ (dormant, unused)
+│   ├── stayingapi_hotel.py        # StayingAPI hotel search + mock (active hotel supplier)
 │   ├── llm_itinerary_service.py   # GPT-4o-mini itinerary generation
 │   ├── llm_checker_service.py     # GPT-4o itinerary quality evaluation
 │   ├── geocoding.py               # Nominatim city → (lat, lon)
@@ -129,7 +130,8 @@ travel_planning_with_agent/
 ## Requirements
 
 - Python 3.10+
-- Duffel developer account (a free test/sandbox API key works for development)
+- Duffel developer account (flights; a free test/sandbox API key works for development)
+- StayingAPI developer account (hotels; free sandbox key)
 - OpenAI API key
 
 **`requirements.txt`:**
@@ -151,6 +153,7 @@ Set the following environment variables before starting the server:
 ```bash
 export OPENAI_API_KEY="sk-..."
 export DUFFEL_API_KEY="your-duffel-api-key"
+export STAYINGAPI_API_KEY="your-stayingapi-key"
 ```
 
 > **Never hardcode API keys in source files.** The Frankfurter currency API requires no key.

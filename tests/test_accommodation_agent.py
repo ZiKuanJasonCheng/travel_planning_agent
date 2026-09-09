@@ -43,7 +43,7 @@ class AccommodationAgentTests(unittest.TestCase):
             "status": "planning",
         }
 
-    @patch("agents.accommodation.get_duffel_hotel_service")
+    @patch("agents.accommodation.get_stayingapi_hotel_service")
     def test_uses_duffel_results_as_primary(self, mock_duffel):
         mock_duffel.return_value = _StubSupplier(
             [
@@ -65,7 +65,7 @@ class AccommodationAgentTests(unittest.TestCase):
         self.assertEqual(new_state["accommodation_options"][0]["supplier"], "duffel")
         self.assertEqual(new_state["accommodation_options"][0]["name"], "Duffel Grand Tokyo")
 
-    @patch("agents.accommodation.get_duffel_hotel_service")
+    @patch("agents.accommodation.get_stayingapi_hotel_service")
     def test_uses_static_fallback_if_supplier_returns_nothing(self, mock_duffel):
         mock_duffel.return_value = _StubSupplier([])
 
@@ -105,7 +105,7 @@ class AccommodationAgentSkipLogicTests(unittest.TestCase):
         state.update(overrides)
         return state
 
-    @patch("agents.accommodation.get_duffel_hotel_service")
+    @patch("agents.accommodation.get_stayingapi_hotel_service")
     def test_skips_when_constraints_unchanged(self, mock_duffel):
         state = self._base_state()
         new_state = accommodation_agent(state)
@@ -117,7 +117,7 @@ class AccommodationAgentSkipLogicTests(unittest.TestCase):
             {"preference": {"max_price_per_night": 150}},
         )
 
-    @patch("agents.accommodation.get_duffel_hotel_service")
+    @patch("agents.accommodation.get_stayingapi_hotel_service")
     def test_replans_when_new_constraints_add_something(self, mock_duffel):
         mock_service = MagicMock()
         mock_service.search_hotels.return_value = []
@@ -133,7 +133,7 @@ class AccommodationAgentSkipLogicTests(unittest.TestCase):
             new_state["constraints"]["accommodation"]["preference"]["area"], "Shibuya"
         )
 
-    @patch("agents.accommodation.get_duffel_hotel_service")
+    @patch("agents.accommodation.get_stayingapi_hotel_service")
     def test_replans_when_rerun_planning_true_even_if_unchanged(self, mock_duffel):
         mock_service = MagicMock()
         mock_service.search_hotels.return_value = []
@@ -152,7 +152,7 @@ class AccommodationAgentSkipLogicTests(unittest.TestCase):
         mock_service.search_hotels.assert_called_once()
         self.assertIsNone(new_state["constraints"]["accommodation"]["rerun_planning"])
 
-    @patch("agents.accommodation.get_duffel_hotel_service")
+    @patch("agents.accommodation.get_stayingapi_hotel_service")
     def test_replans_when_last_run_had_errors_even_if_unchanged(self, mock_duffel):
         mock_service = MagicMock()
         mock_service.search_hotels.return_value = []
@@ -162,7 +162,7 @@ class AccommodationAgentSkipLogicTests(unittest.TestCase):
             accommodation_options=[
                 {
                     "reason": (
-                        "There's a Duffel Hotel API error (or unknown error) at the moment. "
+                        "There's a StayingAPI Hotel API error (or unknown error) at the moment. "
                         "Please wait for a few minutes and submit a feedback saying "
                         "'Run accommodation service again'."
                     )
@@ -173,7 +173,7 @@ class AccommodationAgentSkipLogicTests(unittest.TestCase):
 
         mock_service.search_hotels.assert_called_once()
 
-    @patch("agents.accommodation.get_duffel_hotel_service")
+    @patch("agents.accommodation.get_stayingapi_hotel_service")
     def test_new_trip_always_plans_even_with_no_preferences(self, mock_duffel):
         mock_service = MagicMock()
         mock_service.search_hotels.return_value = []
@@ -186,10 +186,10 @@ class AccommodationAgentSkipLogicTests(unittest.TestCase):
 
         mock_service.search_hotels.assert_called_once()
 
-    @patch("agents.accommodation.get_duffel_hotel_service")
+    @patch("agents.accommodation.get_stayingapi_hotel_service")
     def test_real_api_error_produces_distinct_error_message(self, mock_duffel):
         mock_service = MagicMock()
-        mock_service.search_hotels.return_value = [{"reason": "Duffel Hotel API error"}]
+        mock_service.search_hotels.return_value = [{"reason": "StayingAPI Hotel API error"}]
         mock_duffel.return_value = mock_service
 
         state = self._base_state(new_constraints={"accommodation": {"preference": {"area": "Shibuya"}}})
@@ -197,7 +197,7 @@ class AccommodationAgentSkipLogicTests(unittest.TestCase):
 
         self.assertEqual(len(new_state["accommodation_options"]), 1)
         self.assertIn(
-            "Duffel Hotel API error (or unknown error)",
+            "StayingAPI Hotel API error (or unknown error)",
             new_state["accommodation_options"][0]["reason"],
         )
 
