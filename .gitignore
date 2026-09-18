@@ -5,6 +5,7 @@ __pycache__
 .vscode
 .pytest_cache
 test_logs
+logs
 *_old.py
 openspec
 docs/

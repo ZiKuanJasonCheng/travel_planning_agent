@@ -125,7 +125,7 @@ def _geocode_and_find_nearest(city: str) -> list[str]:
         return []
 
     candidates.sort(key=lambda x: x[0])
-    print(f"candidates: {candidates}")  # Temp
+    print(f"candidates: {candidates}")  # TODO: To be changed to logger
 
     intl = [(d, a) for d, a in candidates if "international" in a.get("name", "").lower()]
     if intl:
@@ -151,10 +151,6 @@ def _lookup_airportsdata(name: str) -> list[str]:
     name_substr = [v for v in airports.values()
                    if key in v.get("name", "").lower() and key not in v.get("city", "").lower()]
 
-    # Temp
-    print(f"city_exact: {city_exact}")
-    print(f"city_substr: {city_substr}")
-    print(f"name_substr: {name_substr}")
 
     for pool in [city_exact, city_substr, name_substr]:
         if not pool:
@@ -165,6 +161,17 @@ def _lookup_airportsdata(name: str) -> list[str]:
         return [pool[0]["iata"]]
 
     return []
+
+
+def get_airport_coords(iata: str) -> Optional[tuple[float, float]]:
+    """Return (lat, lon) for an IATA airport code from the cached OurAirports dataset, or None if unknown."""
+    airport = _get_airports().get(iata.strip().upper())
+    if not airport:
+        return None
+    lat, lon = airport.get("lat"), airport.get("lon")
+    if lat is None or lon is None:
+        return None
+    return lat, lon
 
 
 def resolve_city_iata(name: str) -> str:
