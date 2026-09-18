@@ -47,6 +47,27 @@ _AIRPORTS_FIXTURE: dict = {
 }
 
 
+class GetAirportCoordsTests(unittest.TestCase):
+
+    def setUp(self):
+        _resolver_module._airports = _AIRPORTS_FIXTURE.copy()
+
+    def tearDown(self):
+        _resolver_module._airports = None
+
+    def test_known_iata_returns_coords(self):
+        from services.city_iata_resolver import get_airport_coords
+        self.assertEqual(get_airport_coords("HKG"), (22.3089, 113.9145))
+
+    def test_lowercase_iata_is_normalized(self):
+        from services.city_iata_resolver import get_airport_coords
+        self.assertEqual(get_airport_coords("hkg"), (22.3089, 113.9145))
+
+    def test_unknown_iata_returns_none(self):
+        from services.city_iata_resolver import get_airport_coords
+        self.assertIsNone(get_airport_coords("ZZZ"))
+
+
 class CityIataResolverTests(unittest.TestCase):
 
     def setUp(self):
