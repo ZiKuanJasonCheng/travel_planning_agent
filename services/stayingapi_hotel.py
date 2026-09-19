@@ -3,6 +3,7 @@ StayingAPI Hotel Service
 Wrapper for StayingAPI hotel search functionality (Duffel Stays backup/replacement)
 """
 import json
+import logging
 import os
 import time
 import urllib.parse
@@ -11,6 +12,8 @@ from typing import Optional, List, Dict, Any
 from urllib import error, request
 
 from services.currency import to_usd
+
+logger = logging.getLogger(__name__)
 
 STAYINGAPI_BASE_URL = "https://api.stayingapi.com/v1"
 _JOB_POLL_INTERVAL_SECONDS = 1
@@ -93,7 +96,7 @@ class StayingAPIHotelService:
         if not api_key:
             self.api_key = None
             self.use_mock = True
-            print("Warning: STAYINGAPI_API_KEY not set. Using mock data.")
+            logger.warning("Warning: STAYINGAPI_API_KEY not set. Using mock data.")
         else:
             self.api_key = api_key
             self.use_mock = False
@@ -144,9 +147,10 @@ class StayingAPIHotelService:
                 "limit": 10,
             }
 
-            print(f"search_hotels(): params: {params}")
+            logger.info(f"search_hotels(): params: {params}")
             raw_results = self._request_search(params)
-            print(f"search_hotels(): len(raw_results): {len(raw_results)}")
+            logger.info(f"search_hotels(): len(raw_results): {len(raw_results)}")
+            logger.info(f"search_hotels(): raw_results: {raw_results}", extra={"to_terminal": False})
 
             hotels = []
             for item in raw_results:
@@ -164,10 +168,10 @@ class StayingAPIHotelService:
             return result
 
         except error.HTTPError as http_error:
-            print(f"StayingAPI Hotel API Error: {http_error}, Response body: {http_error.read().decode('utf-8')}")
+            logger.error(f"StayingAPI Hotel API Error: {http_error}, Response body: {http_error.read().decode('utf-8')}")
             return [{"reason": "StayingAPI Hotel API error"}]
         except Exception as e:
-            print(f"Error searching hotels: {e}")
+            logger.error(f"Error searching hotels: {e}")
             return [{"reason": "Unknown error"}]
 
     def _request_search(self, params: Dict[str, Any]) -> List[Dict[str, Any]]:

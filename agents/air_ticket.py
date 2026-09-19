@@ -5,6 +5,7 @@ Uses Duffel API to search for real flight options
 from copy import deepcopy
 from datetime import datetime, timedelta
 from typing import Optional
+import logging
 
 from states.trip_state import TripState, default_transport_options
 from orchestration.tracability import log_trace
@@ -13,6 +14,8 @@ from services.duffel_flight import DuffelFlightService, get_flight_service
 from services.airline_iata_resolver import resolve_airline_iata_codes
 from services.city_iata_resolver import resolve_city_iata_codes
 from services.llm_flight_selector_service import select_flights
+
+logger = logging.getLogger(__name__)
 
 
 _ERROR_REASONS = {"Duffel API error", "Unknown error"}
@@ -345,7 +348,7 @@ def air_ticket_agent(state: TripState) -> TripState:
         }
 
     except Exception as e:
-        print(f"Error in air_ticket_agent: {e}")
+        logger.error(f"Error in air_ticket_agent: {e}")
         transport_options = {
             **existing_transport_options,
             "flight": {

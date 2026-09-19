@@ -5,7 +5,6 @@ from copy import deepcopy
 
 def determine_next_step(state: TripState):
     # Get a feedback from a user
-    #print(f"determine_next_step(): state: {state}")
     dirty_agents = state.get("dirty_agents", [])
     print(f"dirty_agents: {dirty_agents}")
 

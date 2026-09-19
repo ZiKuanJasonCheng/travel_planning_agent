@@ -3,10 +3,13 @@ Duffel Flight API Service
 Wrapper for Duffel flight search functionality
 """
 import json
+import logging
 import os
 import time
 from typing import Optional, List, Dict, Any
 from urllib import error, request
+
+logger = logging.getLogger(__name__)
 
 DUFFEL_API_BASE_URL = "https://api.duffel.com"
 DUFFEL_API_VERSION = "v2"
@@ -120,7 +123,7 @@ class DuffelFlightService:
         if not api_key:
             self.api_key = None
             self.use_mock = True
-            print("Warning: DUFFEL_API_KEY not set. Using mock data.")
+            logger.warning("Warning: DUFFEL_API_KEY not set. Using mock data.")
         else:
             self.api_key = api_key
             self.use_mock = False
@@ -182,14 +185,14 @@ class DuffelFlightService:
             if cabin_class:
                 payload["data"]["cabin_class"] = cabin_class
 
-            print(f"search_flights(): payload: {payload}")
+            logger.info(f"search_flights(): payload: {payload}")
             offers = self._request_offers(payload)
-            print(f"search_flights(): len(offers): {len(offers)}")
+            logger.info(f"search_flights(): len(offers): {len(offers)}")
 
             flights = []
             for i, offer in enumerate(offers):
                 if i < 3:
-                    print(f"search_flights(): offer: {offer}")  # Temp
+                    logger.info(f"search_flights(): offer {i}: {offer}", extra={"to_terminal": False})
                 candidate = self._parse_offer(offer, outbound_preference, inbound_preference)
                 if candidate:
                     flights.append(candidate)
@@ -200,10 +203,10 @@ class DuffelFlightService:
             return result
 
         except error.HTTPError as http_error:
-            print(f"Duffel API Error: {http_error}")
+            logger.error(f"Duffel API Error: {http_error}")
             return [{"type": "flight", "reason": "Duffel API error"}]
         except Exception as e:
-            print(f"Error searching flights: {e}")
+            logger.error(f"Error searching flights: {e}")
             return [{"type": "flight", "reason": "Unknown error"}]
 
     def _request_offers(self, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -271,7 +274,7 @@ class DuffelFlightService:
                 "reason": "Duffel API result",
             }
         except Exception as e:
-            print(f"Error parsing flight offer: {e}")
+            logger.error(f"Error parsing flight offer: {e}")
             return None
 
     def _mock_flight_search(

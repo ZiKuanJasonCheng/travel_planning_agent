@@ -3,8 +3,11 @@ Currency conversion service using the Frankfurter API (ECB data, no API key requ
 Rates are cached in-memory for the lifetime of the process.
 """
 import json
+import logging
 import urllib.request
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 _rates_cache: Optional[dict] = None
 
@@ -24,10 +27,9 @@ def get_rates() -> dict:
         rates = data.get("rates", {})
         rates["USD"] = 1.0
         _rates_cache = rates
-        print(f"Currency rates loaded: {list(rates.keys())}")
         return _rates_cache
     except Exception as e:
-        print(f"Currency rate fetch failed, defaulting to USD=1: {e}")
+        logger.error(f"Currency rate fetch failed, defaulting to USD=1: {e}")
         return {"USD": 1.0}
 
 
@@ -45,6 +47,6 @@ def to_usd(amount: float, currency: str) -> float:
     rates = get_rates()
     rate = rates.get(currency)
     if rate is None:
-        print(f"Unknown currency '{currency}', treating as USD")
+        logger.info(f"Unknown currency '{currency}', treating as USD")
         return float(amount)
     return float(amount) / rate

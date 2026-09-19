@@ -1,8 +1,11 @@
+import logging
 from copy import deepcopy
 
 from states.trip_state import TripState
 from orchestration.tracability import log_trace
 from services.llm_checker_service import evaluate_itinerary
+
+logger = logging.getLogger(__name__)
 
 _MAX_RETRIES = 2
 
@@ -35,7 +38,7 @@ def checker_agent(state: TripState) -> TripState:
             constraints=attraction_constraints,
         )
     except Exception as e:
-        print(f"checker_agent(): LLM call failed ({e}), treating as pass")
+        logger.error(f"checker_agent(): LLM call failed ({e}), treating as pass")
         next_state = {**state, "checker_retry_count": 0, "checker_critique": None}
         if state.get("log_trace"):
             log_trace(
@@ -47,8 +50,9 @@ def checker_agent(state: TripState) -> TripState:
             )
         return next_state
 
+    logger.info(f"checker_agent(): result: {result}", extra={"to_terminal": False})
     if result["passed"]:
-        print("checker_agent(): itinerary passed quality check")
+        logger.info("checker_agent(): itinerary passed quality check", extra={"to_terminal": False})
         next_state = {**state, "checker_retry_count": 0, "checker_critique": None}
         if state.get("log_trace"):
             log_trace(
@@ -59,8 +63,6 @@ def checker_agent(state: TripState) -> TripState:
                 outputs={"passed": True},
             )
         return next_state
-
-    print(f"checker_agent(): issues found: {result['issues']}")
 
     if retry_count < _MAX_RETRIES:
         dirty_agents = list(state.get("dirty_agents", []))

@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Optional
 from openai import OpenAI
 from states.accommodation_constraints import AccommodationConstraint
@@ -9,6 +10,7 @@ import os
 from services.currency import get_rates
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT_TEMPLATE = """
 You are an experienced travel assistant that extracts structured constraints from user feedback.
@@ -48,19 +50,17 @@ def parse_feedback_with_llm(feedback: str) -> Optional[Constraints]:
             timeout=60,
             temperature=0
         )
+    except Exception as e:
+        logger.error(f"parse_feedback_with_llm: error parsing feedback by LLM because of LLM service error: {e}")
+        # TODO: Retry 3 times with exponential backoff
+        raise
 
-        # print(f"response: {response}")
-        # print(f"response.choices: {response.choices}")
-        # print(f"response.choices[0]: {response.choices[0]}")
-        # print(f"response.choices[0].message: {response.choices[0].message}")
-        # print(f"response.choices[0].message.tool_calls: {response.choices[0].message.tool_calls}")
+    try:
         tool_call = response.choices[0].message.tool_calls[0]
-        #print(f"tool_call: {tool_call}")
-        #print(f"tool_call.function: {tool_call.function}")
         args = tool_call.function.arguments
-        print(f"args: {args}")
+        logger.info(f"parse_feedback_with_llm(): args: {args}")
 
         return Constraints.model_validate_json(args)
     except Exception as e:
-        print(f"parse_feedback_with_llm: error parsing feedback by LLM: {e}")
-        return
+        logger.error(f"parse_feedback_with_llm: error parsing generated arguments by LLM: {e}")
+        raise

@@ -1,25 +1,30 @@
+import logging
 from typing import Any, Optional
 from states.trip_state import TripState
 from orchestration.llm_feedback_parsing import parse_feedback_with_llm
 from orchestration.dependency import CONSTRAINT_AGENT_MAP, propagate_dirty_agents, topo_sort_agents
+
+logger = logging.getLogger(__name__)
 
 
 def apply_user_feedback(state: TripState, feedback) -> bool:
     """
     Returns True if constraints changed, False otherwise
     """
-    
-    new_constraints = parse_feedback_with_llm(feedback)
-    if not new_constraints:
-        return False
+    new_constraints = None
+    try:
+        new_constraints = parse_feedback_with_llm(feedback)
+        if not new_constraints:
+            return False
+    except Exception as e:
+        logger.error(f"apply_user_feedback(): an error occurred while parsing feedback by LLM. Error message: {e}")
+        raise
     
     state["feedback"] = feedback
 
     existing_constraints = state.get("constraints", {})
-    #print(f"existing_constraints: {existing_constraints}")
     dict_new_constraints = new_constraints.model_dump(exclude_none=True)
     state["new_constraints"] = dict_new_constraints
-    #print(f"dict_new_constraints: {dict_new_constraints}")
     # Constraints are no longer merged/persisted here — each agent merges
     # new_constraints into constraints for its own scope and decides for
     # itself whether real replanning is needed. state["constraints"] stays
@@ -38,7 +43,6 @@ def apply_user_feedback(state: TripState, feedback) -> bool:
     # for key in changed_keys:
     #     agent = CONSTRAINT_AGENT_MAP.get(key, [])
     #     dirty_agents.update(agent)
-    #print(f"Before propagating to downstream agents, dirty_agents: {dirty_agents}")
 
     dirty_agents = propagate_dirty_agents(dirty_agents)  #propagate_agent_dependencies(dirty_agents)
     dirty_agents = topo_sort_agents(dirty_agents)  # Now dirty_agents is a list in topological order
@@ -47,7 +51,7 @@ def apply_user_feedback(state: TripState, feedback) -> bool:
     state["dirty_agents"] = dirty_agents
     
 
-    print(f"apply_user_feedback(): state: {state}")
+    logger.info(f"apply_user_feedback(): state: {state}", extra={"to_terminal": False})
 
     return True
 

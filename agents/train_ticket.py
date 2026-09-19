@@ -71,6 +71,4 @@ def train_ticket_agent(state: TripState) -> TripState:
             outputs={"transport_options": deepcopy(transport_options)},
         )
 
-    print("train_ticket_agent(): Added train option")
-
     return new_state
