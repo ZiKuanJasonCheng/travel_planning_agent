@@ -2,6 +2,7 @@
 Transport Agent - Main agent that coordinates transportation planning
 Delegates to sub-agents: air_ticket_agent, train_ticket_agent
 """
+import logging
 from typing import List, Optional
 
 from states.trip_state import TripState, default_transport_options
@@ -9,6 +10,8 @@ from orchestration.tracability import log_trace
 from agents.air_ticket import air_ticket_agent
 from agents.train_ticket import train_ticket_agent
 from copy import deepcopy
+
+logger = logging.getLogger(__name__)
 
 
 def _has_any_transport_options(transport_options: dict) -> bool:
@@ -52,7 +55,7 @@ def transport_agent(state: TripState) -> TripState:
         try:
             state = sub_agent_func(state)
         except Exception as e:
-            print(f"Error in {sub_agent_name}: {e}")
+            logger.error(f"Error in {sub_agent_name}: {e}")
 
     existing = state.get("transport_options")
     transport_options = (
@@ -67,7 +70,7 @@ def transport_agent(state: TripState) -> TripState:
             outputs={"transport_options": deepcopy(transport_options)},
         )
 
-    print(f"transport_agent(): Coordinated {len(sub_agents_to_call)} sub-agents")
+    logger.info(f"transport_agent(): Coordinated sub-agents: {sub_agents_to_call}", extra={"to_terminal": False})
 
     return {**state, "transport_options": transport_options}
 

@@ -204,7 +204,7 @@ class WeatherMCPService:
             result = {"hours": hours} if hours else None
             _log_call("success" if result else "no_data", lat, lon, target_date, target_time)
         except Exception as e:
-            print(f"WeatherMCPService.get_forecast(): failed to fetch forecast ({e})")
+            logging.getLogger(__name__).error(f"WeatherMCPService.get_forecast(): failed to fetch forecast: {e}")
             _log_call("error", lat, lon, target_date, target_time, detail=str(e))
             result = None
 

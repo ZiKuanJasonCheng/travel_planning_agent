@@ -1,9 +1,13 @@
+import logging
+
 from states.trip_state import TripState
 from orchestration.tracability import log_trace
 from orchestration.merge_constraints import resolve_category_constraints, UNLIMITED_PRICE
 from services.stayingapi_hotel import get_stayingapi_hotel_service
 from copy import deepcopy
 from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
 
 
 _ERROR_REASONS = {"StayingAPI Hotel API error", "Unknown error"}
@@ -71,7 +75,7 @@ def accommodation_agent(state: TripState) -> TripState:
 
     check_in_date = state.get("start_date") or _default_check_in_date()
     check_out_date = state.get("end_date") or _default_check_out_date(check_in_date, days)
-    print(f"accommodation_agent(): max_price_per_night: {max_price_per_night}, preferred_area: {preferred_area}, check_in_date: {check_in_date}, check_out_date: {check_out_date}")
+    logger.info(f"Key inputs for accommodation_agent: max_price_per_night: {max_price_per_night}, preferred_area: {preferred_area}, check_in_date: {check_in_date}, check_out_date: {check_out_date}", extra={"to_terminal": False})
 
     num_people = state.get("num_people") or 1
     hotel_service = get_stayingapi_hotel_service()
@@ -105,7 +109,7 @@ def accommodation_agent(state: TripState) -> TripState:
             outputs={"accommodation_options": deepcopy(accommodation_options)}
         )
 
-    print(f"accommodation_agent(): accommodation_options: {accommodation_options}")
+    logger.info(f"accommodation_agent: accommodation_options: {accommodation_options}", extra={"to_terminal": False})
 
     return {**state, "accommodation_options": accommodation_options, "constraints": constraints}
 

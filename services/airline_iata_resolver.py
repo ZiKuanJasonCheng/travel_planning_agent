@@ -3,9 +3,12 @@ Airline IATA Code Resolver
 Converts airline names (e.g. "Cathay Pacific") to IATA codes (e.g. "CX") using an LLM.
 """
 import json
+import logging
 from typing import List, Optional
 from openai import OpenAI
 import os
+
+logger = logging.getLogger(__name__)
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -61,13 +64,17 @@ def resolve_airline_iata_codes(airline_names: List[str]) -> List[str]:
             tool_choice={"type": "function", "function": {"name": "return_iata_codes"}},
             timeout=60
         )
+    except Exception as e:
+        logger.error(f"resolve_airline_iata_codes: LLM service error: {e}")
+        # TODO: Retry 3 times with exponential backoff
+        raise
 
+    try:
         tool_call = response.choices[0].message.tool_calls[0]
         result = json.loads(tool_call.function.arguments)
         resolved = result.get("iata_codes", [])
         return already_codes + resolved
-
     except Exception as e:
-        print(f"airline_iata_resolver: error resolving {needs_resolution}: {e}")
+        logger.error(f"resolve_airline_iata_codes: error parsing generated arguments by LLM. needs_resolution: {needs_resolution}. Error message: {e}")
         # Fall back to the original names so filtering degrades gracefully
         return already_codes + needs_resolution

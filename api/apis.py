@@ -1,3 +1,4 @@
+import logging
 from fastapi import Query, FastAPI, APIRouter, Response, status, HTTPException
 from session import create_session, get_session, update_session
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -8,8 +9,10 @@ from orchestration.human_feedback import apply_user_feedback
 from orchestration.graph_runner import run_until_needing_feedback_or_finished
 from orchestration.llm_feedback_parsing import parse_feedback_with_llm
 from services.geocoding import check_city_granularity
+from logging_config import setup_request_logging
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class RequestModel(BaseModel):
@@ -60,9 +63,20 @@ class FeedbackModel(BaseModel):
 
 @router.post("/trip/start")
 def start_trip(param: RequestModel):
+    setup_request_logging("new_trip")
+    logger.info(f"start_trip(): received request for destination={param.destination}, origin={param.origin}")
+
     constraints = None
+
     if param.preferences:
-        constraints = parse_feedback_with_llm(", ".join(param.preferences))
+        try:
+            constraints = parse_feedback_with_llm(", ".join(param.preferences))
+        except Exception as e:
+            logger.error(f"start_trip(): failed to parse user constraints. {e}")
+            return {
+                "status": "failed",
+                "message": "An error occcurred while processing preferences. It might be an LLM service issue. Please wait and try again.",
+            }
     
     if constraints:
         constraints = constraints.model_dump()
@@ -88,7 +102,7 @@ def start_trip(param: RequestModel):
         "dirty_agents": ["transport_agent", "accommodation_agent", "attraction_agent"],
         "traces": [],
     }
-    print(f"start_trip(): state: {state}")
+    logger.info(f"start_trip(): state: {state}", extra={"to_terminal": False})
 
     session_id = create_session(state)
     state["session_id"] = session_id  # Agents might use session_id
@@ -96,6 +110,7 @@ def start_trip(param: RequestModel):
     update_session(session_id, state)
 
     format_state_before_return(state)
+    logger.info(f"start_trip(): completed with status={state['status']}")
     return {
         "session_id": session_id,
         "status": state["status"],
@@ -105,17 +120,31 @@ def start_trip(param: RequestModel):
 
 @router.post("/trip/feedback")  # /trip/{session_id}/feedback
 def submit_feedback(param: FeedbackModel):
+    setup_request_logging("feedback")
+    logger.info(f"submit_feedback(): received feedback for session_id={param.session_id}")
+
     state = get_session(param.session_id)
     if state is None:
         raise HTTPException(status_code=404, detail="Session not found")
     state["session_id"] = state.get("session_id", param.session_id)  # Agents might use session_id
-    print(f"Retrieved state! state: {state}")
-    
-    changed = apply_user_feedback(state, param.feedback)
+    logger.info(f"Retrieved state! state: {state}", extra={"to_terminal": False})
+
+    changed = False
+    try:
+        changed = apply_user_feedback(state, param.feedback)
+    except Exception as e:
+        logger.error(f"submit_feedback(): failed to parse user feedback to know if a constraint has been changed. Error message: {e}")
+        return {
+            "session_id": param.session_id,
+            "status": state["status"],
+            "message": "An error occcurred while processing sumbitted feedback. It might be an LLM service issue. Please wait and try again.",
+        }
+
 
     if not changed:
         state["status"] = "completed"
         update_session(param.session_id, state)
+        logger.info(f"submit_feedback(): completed with status={state['status']}")
         return {
             "session_id": param.session_id,
             "status": state["status"],
@@ -128,6 +157,7 @@ def submit_feedback(param: FeedbackModel):
     update_session(param.session_id, state)
 
     format_state_before_return(state)
+    logger.info(f"submit_feedback(): completed with status={state['status']}")
     return {
         "session_id": param.session_id,
         "status": state["status"],

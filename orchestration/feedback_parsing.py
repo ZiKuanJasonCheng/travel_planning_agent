@@ -17,7 +17,7 @@ def parse_feedback(feedback: str) -> AccommodationConstraint:
         constraint.setdefault("preference", {})
         constraint["preference"]["area"] = "city center"
 
-    print(f"parse_feedback(): constraint: {constraint}")
+    print(f"parse_feedback(): constraint: {constraint}")  # TODO: To be changed to logger
 
     return constraint
 

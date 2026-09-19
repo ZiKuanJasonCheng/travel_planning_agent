@@ -1,8 +1,11 @@
 """Shared geocoding utility using Nominatim (OpenStreetMap)."""
 import json
+import logging
 import urllib.parse
 import urllib.request
 from typing import Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 _NOMINATIM_HEADERS = {"User-Agent": "travel-planning-agent/1.0"}
 
@@ -37,7 +40,7 @@ def fetch_coordinates(city_name: str) -> Optional[Tuple[float, float]]:
         if data:
             return float(data[0]["lat"]), float(data[0]["lon"])
     except Exception as error:
-        print(f"Nominatim lookup failed for '{city_name}': {error}")
+        logger.error(f"Nominatim lookup failed for '{city_name}': {error}")
     return None
 
 
@@ -47,7 +50,7 @@ def check_city_granularity(name: str) -> None:
         data = _nominatim_search(name)
     except Exception:
         return  # Network error — don't block the request
-    print(f"data: {data}")
+    logger.info(f"data: {data}", extra={"to_terminal": False})
     if not data:
         return  # Unknown place — let geocoding fail downstream if needed
 

@@ -1,9 +1,12 @@
+import logging
 from copy import deepcopy
 
 from states.trip_state import TripState
 from orchestration.tracability import log_trace
 from orchestration.merge_constraints import resolve_category_constraints, UNLIMITED_PRICE
 from services.llm_itinerary_service import get_llm_itinerary_service
+
+logger = logging.getLogger(__name__)
 
 
 _ERROR_REASONS = {"LLM API error", "Unknown error"}
@@ -84,7 +87,7 @@ def attraction_agent(state: TripState) -> TripState:
     styles = preference.get("styles")
     must_go_places = preference.get("must_go_places")
     exclusions = preference.get("exclusions")
-    print(f"attraction_agent(): max_price_per_ticket: {max_price_per_ticket}, styles: {styles}, must_go_places: {must_go_places}, exclusions: {exclusions}")
+    logger.info(f"Key inputs for attraction_agent: max_price_per_ticket: {max_price_per_ticket}, styles: {styles}, must_go_places: {must_go_places}, exclusions: {exclusions}", extra={"to_terminal": False})
 
     # Step 3: log_trace at entry
     if state.get("log_trace"):
@@ -146,7 +149,7 @@ def attraction_agent(state: TripState) -> TripState:
         elif not itinerary:
             itinerary = _build_fallback_itinerary(destination, days, hotel_area, hotel_lat, hotel_lon)
     except Exception as e:
-        print(f"attraction_agent(): unexpected error: {e}")
+        logger.error(f"attraction_agent(): unexpected error: {e}")
         itinerary = _build_fallback_itinerary(destination, days, hotel_area, hotel_lat, hotel_lon)
 
     # Step 5: log_trace at exit
@@ -165,7 +168,7 @@ def attraction_agent(state: TripState) -> TripState:
 
     dirty_agents = list(state.get("dirty_agents", []))
     dirty_agents.append("checker_agent")
-    print(f"attraction_agent(): generated {len(itinerary)} days")
+    logger.info(f"attraction_agent: itinerary: {itinerary}", extra={"to_terminal": False})
     return {**state, "itinerary": itinerary, "dirty_agents": dirty_agents, "constraints": constraints}
 
 

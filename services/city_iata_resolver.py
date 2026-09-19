@@ -1,12 +1,14 @@
 """Resolve a city name to its IATA airport code using the OurAirports dataset."""
 import csv
 import io
+import logging
 import math
 import urllib.request
 from typing import Optional
 
 from services.geocoding import fetch_coordinates
-#from geocoding import fetch_coordinates  # Temp
+
+logger = logging.getLogger(__name__)
 
 
 _NEAREST_AIRPORT_RADIUS_KM = 300
@@ -83,7 +85,7 @@ def _get_airports() -> dict:
             }
         _airports = result
     except Exception as e:
-        print(f"_get_airports(): failed to load OurAirports data ({e}), airport lookup disabled")
+        logger.error(f"_get_airports(): failed to load OurAirports data. Airport lookup disabled. Error message: {e}")
         _airports = {}
 
     return _airports
@@ -125,7 +127,7 @@ def _geocode_and_find_nearest(city: str) -> list[str]:
         return []
 
     candidates.sort(key=lambda x: x[0])
-    print(f"candidates: {candidates}")  # TODO: To be changed to logger
+    logger.info(f"candidates: {candidates}", extra={"to_terminal": False})
 
     intl = [(d, a) for d, a in candidates if "international" in a.get("name", "").lower()]
     if intl:

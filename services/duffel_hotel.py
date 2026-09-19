@@ -3,6 +3,7 @@ Duffel Stays API Service
 Wrapper for Duffel hotel search functionality
 """
 import json
+import logging
 import os
 import time
 from datetime import date, datetime, timedelta
@@ -11,6 +12,8 @@ from urllib import error, request
 
 from services.currency import to_usd
 from services.geocoding import fetch_coordinates
+
+logger = logging.getLogger(__name__)
 
 DUFFEL_API_BASE_URL = "https://api.duffel.com"
 DUFFEL_API_VERSION = "v2"
@@ -94,7 +97,7 @@ class DuffelHotelService:
         if not api_key:
             self.api_key = None
             self.use_mock = True
-            print("Warning: DUFFEL_API_KEY not set. Using mock data.")
+            logger.warning("Warning: DUFFEL_API_KEY not set. Using mock data.")
         else:
             self.api_key = api_key
             self.use_mock = False
@@ -159,9 +162,9 @@ class DuffelHotelService:
                 }
             }
 
-            print(f"search_hotels(): payload: {payload}")
+            logger.info(f"search_hotels(): payload: {payload}")
             raw_results = self._request_search(payload)
-            print(f"search_hotels(): len(raw_results): {len(raw_results)}")
+            logger.info(f"search_hotels(): len(raw_results): {len(raw_results)}")
 
             hotels = []
             for item in raw_results:
@@ -179,10 +182,10 @@ class DuffelHotelService:
             return result
 
         except error.HTTPError as http_error:
-            print(f"Duffel Hotel API Error: {http_error}, Response body: {http_error.read().decode('utf-8')}")
+            logger.error(f"Duffel Hotel API Error: {http_error}, Response body: {http_error.read().decode('utf-8')}")
             return [{"reason": "Duffel Hotel API error"}]
         except Exception as e:
-            print(f"Error searching hotels: {e}")
+            logger.error(f"Error searching hotels: {e}")
             return [{"reason": "Unknown error"}]
 
     def _request_search(self, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
