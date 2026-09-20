@@ -1,7 +1,7 @@
 import logging
 import os
 
-from langfuse import Langfuse, observe
+from langfuse import Langfuse, observe, propagate_attributes
 from langfuse.langchain import CallbackHandler
 
 logger = logging.getLogger(__name__)
@@ -49,16 +49,8 @@ def get_callback_handler() -> CallbackHandler | None:
     if not _is_configured():
         return None
     if _callback_handler is None:
-        _callback_handler = CallbackHandler(
-            public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
-            secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
-        )
+        _callback_handler = CallbackHandler()
     return _callback_handler
 
 
-# Create a stub for langfuse_context for compatibility
-# The actual context management from langfuse will be available
-# through the Langfuse client instance
-langfuse_context = None
-
-__all__ = ["get_langfuse_client", "get_callback_handler", "observe", "langfuse_context"]
+__all__ = ["get_langfuse_client", "get_callback_handler", "observe", "propagate_attributes"]
