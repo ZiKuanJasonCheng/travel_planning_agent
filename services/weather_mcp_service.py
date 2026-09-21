@@ -24,6 +24,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from services.langfuse_client import observe
+
 _WEATHER_MCP_COMMAND = "npx"
 _WEATHER_MCP_ARGS = ["-y", "@dangahagan/weather-mcp@latest"]
 
@@ -175,6 +177,7 @@ class WeatherMCPService:
         self._cache: Dict[Tuple[float, float, str, str], Any] = {}
         self._cache_ttl_seconds = self._CACHE_TTL_SECONDS
 
+    @observe()
     def get_forecast(self, lat: float, lon: float, target_date: str, target_time: str) -> Optional[Dict[str, Any]]:
         """
         Return the forecast for the hour nearest target_date/target_time plus the hour before

@@ -5,6 +5,8 @@ import urllib.parse
 import urllib.request
 from typing import Optional, Tuple
 
+from services.langfuse_client import observe
+
 logger = logging.getLogger(__name__)
 
 _NOMINATIM_HEADERS = {"User-Agent": "travel-planning-agent/1.0"}
@@ -33,6 +35,7 @@ def _nominatim_search(query: str) -> list:
         return json.loads(resp.read().decode("utf-8"))
 
 
+@observe()
 def fetch_coordinates(city_name: str) -> Optional[Tuple[float, float]]:
     """Return (latitude, longitude) for a city name via Nominatim, or None on failure."""
     try:

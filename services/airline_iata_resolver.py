@@ -8,6 +8,8 @@ from typing import List, Optional
 from openai import OpenAI
 import os
 
+from services.langfuse_client import observe
+
 logger = logging.getLogger(__name__)
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -30,6 +32,7 @@ _SCHEMA = {
 }
 
 
+@observe()
 def resolve_airline_iata_codes(airline_names: List[str]) -> List[str]:
     """
     Convert a list of airline names to IATA codes.

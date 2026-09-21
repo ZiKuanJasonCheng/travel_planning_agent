@@ -9,6 +9,8 @@ import time
 from typing import Optional, List, Dict, Any
 from urllib import error, request
 
+from services.langfuse_client import observe
+
 logger = logging.getLogger(__name__)
 
 DUFFEL_API_BASE_URL = "https://api.duffel.com"
@@ -128,6 +130,7 @@ class DuffelFlightService:
             self.api_key = api_key
             self.use_mock = False
 
+    @observe()
     def search_flights(
         self,
         origin: str,
