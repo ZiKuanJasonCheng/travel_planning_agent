@@ -63,7 +63,7 @@ class FeedbackModel(BaseModel):
 
 @router.post("/trip/start")
 def start_trip(param: RequestModel):
-    setup_request_logging("new_trip")
+    log_file = setup_request_logging("new_trip")
     logger.info(f"start_trip(): received request for destination={param.destination}, origin={param.origin}")
 
     constraints = None
@@ -101,6 +101,7 @@ def start_trip(param: RequestModel):
         "log_trace": True,
         "dirty_agents": ["transport_agent", "accommodation_agent", "attraction_agent"],
         "traces": [],
+        "log_file": log_file,
     }
     logger.info(f"start_trip(): state: {state}", extra={"to_terminal": False})
 
@@ -120,13 +121,14 @@ def start_trip(param: RequestModel):
 
 @router.post("/trip/feedback")  # /trip/{session_id}/feedback
 def submit_feedback(param: FeedbackModel):
-    setup_request_logging("feedback")
+    log_file = setup_request_logging("feedback")
     logger.info(f"submit_feedback(): received feedback for session_id={param.session_id}")
 
     state = get_session(param.session_id)
     if state is None:
         raise HTTPException(status_code=404, detail="Session not found")
     state["session_id"] = state.get("session_id", param.session_id)  # Agents might use session_id
+    state["log_file"] = log_file
     logger.info(f"Retrieved state! state: {state}", extra={"to_terminal": False})
 
     changed = False
