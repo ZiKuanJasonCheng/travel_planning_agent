@@ -1,7 +1,8 @@
+import functools
 import logging
 import os
 
-from langfuse import Langfuse, observe, propagate_attributes
+from langfuse import Langfuse, observe as _langfuse_observe, propagate_attributes
 from langfuse.langchain import CallbackHandler
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,47 @@ def get_callback_handler() -> CallbackHandler | None:
     if _callback_handler is None:
         _callback_handler = CallbackHandler()
     return _callback_handler
+
+
+def observe(
+    func=None,
+    *,
+    name=None,
+    as_type=None,
+    capture_input=None,
+    capture_output=None,
+    transform_to_string=None,
+):
+    """Fail-safe wrapper around langfuse's `observe` decorator.
+
+    When Langfuse is unconfigured, the decorated function is called
+    directly with zero langfuse machinery invoked (no `get_client()`
+    call at all), avoiding the repeated "Authentication error" warnings
+    that the real `observe` decorator logs on every call when no
+    singleton client has been seeded. When configured, delegates fully
+    to the real langfuse `observe` behavior.
+    """
+
+    def decorator(f):
+        real_observed = _langfuse_observe(
+            name=name,
+            as_type=as_type,
+            capture_input=capture_input,
+            capture_output=capture_output,
+            transform_to_string=transform_to_string,
+        )(f)
+
+        @functools.wraps(f)
+        def wrapper(*args, **kwargs):
+            if not _is_configured():
+                return f(*args, **kwargs)
+            return real_observed(*args, **kwargs)
+
+        return wrapper
+
+    if func is not None:
+        return decorator(func)
+    return decorator
 
 
 __all__ = ["get_langfuse_client", "get_callback_handler", "observe", "propagate_attributes"]
