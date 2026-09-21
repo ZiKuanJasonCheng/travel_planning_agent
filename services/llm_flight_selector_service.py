@@ -4,6 +4,7 @@ from typing import Optional, TypedDict
 from openai import OpenAI
 
 from services.city_iata_resolver import get_airport_coords
+from services.langfuse_client import observe
 from services.weather_mcp_service import get_weather_service, is_within_forecast_horizon
 
 
@@ -131,6 +132,7 @@ def _candidates_summary(candidates: Optional[list], weather_cache: dict) -> str:
     return "\n".join(lines)
 
 
+@observe(as_type="generation")
 def select_flights(
     round_trip_candidates: Optional[list] = None,
     outbound_candidates: Optional[list] = None,

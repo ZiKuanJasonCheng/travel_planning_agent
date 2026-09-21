@@ -8,6 +8,7 @@ from states.trip_state import TripState
 import os
 
 from services.currency import get_rates
+from services.langfuse_client import observe
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 logger = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ def _build_system_prompt() -> str:
     return _SYSTEM_PROMPT_TEMPLATE.format(rates_json=json.dumps(rates, indent=2))
 
 
+@observe(as_type="generation")
 def parse_feedback_with_llm(feedback: str) -> Optional[Constraints]:
     """Parse feedback with LLM into a constraint object. All price values are normalized to USD."""
     if not feedback:

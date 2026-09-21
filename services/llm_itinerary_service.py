@@ -10,6 +10,8 @@ from typing import Optional
 
 from openai import OpenAI, APIError
 
+from services.langfuse_client import observe
+
 logger = logging.getLogger(__name__)
 
 
@@ -229,6 +231,7 @@ Respond ONLY with valid JSON matching this structure:
 
         return self._call_llm(prompt, context="update_itinerary")
 
+    @observe(as_type="generation")
     def _call_llm(self, prompt: str, context: str) -> list[dict]:
         try:
             response = self.client.chat.completions.create(
