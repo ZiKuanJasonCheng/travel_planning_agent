@@ -1,16 +1,15 @@
 import json
 import logging
 from typing import Optional
-from langfuse.openai import OpenAI
 from states.accommodation_constraints import AccommodationConstraint
 from states.constraints import Constraints
 from states.trip_state import TripState
 import os
 
 from services.currency import get_rates
-from services.langfuse_client import observe
+from services.langfuse_client import get_openai_client_class, observe
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = get_openai_client_class()(api_key=os.getenv("OPENAI_API_KEY"))
 logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT_TEMPLATE = """
@@ -28,7 +27,7 @@ def _build_system_prompt() -> str:
     return _SYSTEM_PROMPT_TEMPLATE.format(rates_json=json.dumps(rates, indent=2))
 
 
-@observe(as_type="generation")
+@observe()
 def parse_feedback_with_llm(feedback: str) -> Optional[Constraints]:
     """Parse feedback with LLM into a constraint object. All price values are normalized to USD."""
     if not feedback:

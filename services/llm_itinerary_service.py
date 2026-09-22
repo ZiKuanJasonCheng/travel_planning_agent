@@ -9,9 +9,8 @@ import os
 from typing import Optional
 
 from openai import APIError
-from langfuse.openai import OpenAI
 
-from services.langfuse_client import observe
+from services.langfuse_client import get_openai_client_class, observe
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +115,7 @@ def _day_rules(arrival_time: Optional[str], return_depart_time: Optional[str], d
 class LLMItineraryService:
     def __init__(self):
         api_key = os.getenv("OPENAI_API_KEY")
-        self.client: Optional[OpenAI] = OpenAI(api_key=api_key) if api_key else None
+        self.client = get_openai_client_class()(api_key=api_key) if api_key else None
 
     def generate_itinerary(
         self,
@@ -232,7 +231,7 @@ Respond ONLY with valid JSON matching this structure:
 
         return self._call_llm(prompt, context="update_itinerary")
 
-    @observe(as_type="generation")
+    @observe()
     def _call_llm(self, prompt: str, context: str) -> list[dict]:
         try:
             response = self.client.chat.completions.create(

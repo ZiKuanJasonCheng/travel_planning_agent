@@ -54,6 +54,25 @@ def get_callback_handler() -> CallbackHandler | None:
     return _callback_handler
 
 
+def get_openai_client_class():
+    """Return the OpenAI client class to instantiate, chosen by Langfuse config state.
+
+    When Langfuse is configured, returns `langfuse.openai.OpenAI` so that completions
+    are auto-instrumented (model/usage/tokens captured on a Langfuse generation span).
+    When unconfigured, returns the plain `openai.OpenAI` class so that importing
+    `langfuse.openai` — which installs a process-wide monkey-patch onto
+    `openai.resources.chat.completions.Completions.create` calling `langfuse.get_client()`
+    on every call — never happens at all, avoiding the repeated "Authentication error"
+    warnings that patch triggers when unconfigured. The import is done lazily, inside
+    this function, so `langfuse.openai` is only ever imported when actually needed.
+    """
+    if _is_configured():
+        from langfuse.openai import OpenAI as LangfuseOpenAI
+        return LangfuseOpenAI
+    from openai import OpenAI
+    return OpenAI
+
+
 def observe(
     func=None,
     *,
@@ -95,4 +114,10 @@ def observe(
     return decorator
 
 
-__all__ = ["get_langfuse_client", "get_callback_handler", "observe", "propagate_attributes"]
+__all__ = [
+    "get_langfuse_client",
+    "get_callback_handler",
+    "get_openai_client_class",
+    "observe",
+    "propagate_attributes",
+]

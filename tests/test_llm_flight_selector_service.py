@@ -27,10 +27,10 @@ def _mock_openai_response(round_trip_index, outbound_index, inbound_index, reaso
 
 
 class SelectFlightsTests(unittest.TestCase):
-    @patch("services.llm_flight_selector_service.OpenAI")
+    @patch("services.llm_flight_selector_service.get_openai_client_class")
     def test_selects_round_trip_index(self, mock_openai_cls):
         mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
+        mock_openai_cls.return_value = MagicMock(return_value=mock_client)
         mock_client.chat.completions.create.return_value = _mock_openai_response(
             round_trip_index=1, outbound_index=None, inbound_index=None,
             reason="Cheapest direct option",
@@ -46,10 +46,10 @@ class SelectFlightsTests(unittest.TestCase):
         self.assertIsNone(result["outbound_index"])
         self.assertEqual(result["reason"], "Cheapest direct option")
 
-    @patch("services.llm_flight_selector_service.OpenAI")
+    @patch("services.llm_flight_selector_service.get_openai_client_class")
     def test_selects_outbound_and_inbound_indices(self, mock_openai_cls):
         mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
+        mock_openai_cls.return_value = MagicMock(return_value=mock_client)
         mock_client.chat.completions.create.return_value = _mock_openai_response(
             round_trip_index=None, outbound_index=0, inbound_index=2,
             reason="Best fit for both legs",
@@ -68,12 +68,12 @@ class SelectFlightsTests(unittest.TestCase):
 
     @patch("services.llm_flight_selector_service.get_weather_service")
     @patch("services.llm_flight_selector_service.get_airport_coords")
-    @patch("services.llm_flight_selector_service.OpenAI")
+    @patch("services.llm_flight_selector_service.get_openai_client_class")
     def test_includes_weather_in_prompt_when_available(
         self, mock_openai_cls, mock_get_coords, mock_get_weather_service
     ):
         mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
+        mock_openai_cls.return_value = MagicMock(return_value=mock_client)
         mock_client.chat.completions.create.return_value = _mock_openai_response(
             round_trip_index=0, outbound_index=None, inbound_index=None,
             reason="Good weather and price",
@@ -105,12 +105,12 @@ class SelectFlightsTests(unittest.TestCase):
 
     @patch("services.llm_flight_selector_service.get_weather_service")
     @patch("services.llm_flight_selector_service.get_airport_coords")
-    @patch("services.llm_flight_selector_service.OpenAI")
+    @patch("services.llm_flight_selector_service.get_openai_client_class")
     def test_selection_works_when_weather_unavailable(
         self, mock_openai_cls, mock_get_coords, mock_get_weather_service
     ):
         mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
+        mock_openai_cls.return_value = MagicMock(return_value=mock_client)
         mock_client.chat.completions.create.return_value = _mock_openai_response(
             round_trip_index=0, outbound_index=None, inbound_index=None,
             reason="Best available option",

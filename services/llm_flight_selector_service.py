@@ -1,10 +1,9 @@
 import json
 import os
 from typing import Optional, TypedDict
-from langfuse.openai import OpenAI
 
 from services.city_iata_resolver import get_airport_coords
-from services.langfuse_client import observe
+from services.langfuse_client import get_openai_client_class, observe
 from services.weather_mcp_service import get_weather_service, is_within_forecast_horizon
 
 
@@ -132,7 +131,7 @@ def _candidates_summary(candidates: Optional[list], weather_cache: dict) -> str:
     return "\n".join(lines)
 
 
-@observe(as_type="generation")
+@observe()
 def select_flights(
     round_trip_candidates: Optional[list] = None,
     outbound_candidates: Optional[list] = None,
@@ -140,7 +139,7 @@ def select_flights(
     outbound_preference: Optional[dict] = None,
     inbound_preference: Optional[dict] = None,
 ) -> FlightSelection:
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    client = get_openai_client_class()(api_key=os.getenv("OPENAI_API_KEY"))
 
     weather_cache: dict = {}
     user_content = (
