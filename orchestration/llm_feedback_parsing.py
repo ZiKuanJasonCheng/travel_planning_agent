@@ -1,7 +1,7 @@
 import json
 import logging
 from typing import Optional
-from openai import OpenAI
+from langfuse.openai import OpenAI
 from states.accommodation_constraints import AccommodationConstraint
 from states.constraints import Constraints
 from states.trip_state import TripState

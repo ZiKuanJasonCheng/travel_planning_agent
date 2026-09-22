@@ -8,7 +8,8 @@ import logging
 import os
 from typing import Optional
 
-from openai import OpenAI, APIError
+from openai import APIError
+from langfuse.openai import OpenAI
 
 from services.langfuse_client import observe
 

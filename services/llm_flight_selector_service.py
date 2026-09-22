@@ -1,7 +1,7 @@
 import json
 import os
 from typing import Optional, TypedDict
-from openai import OpenAI
+from langfuse.openai import OpenAI
 
 from services.city_iata_resolver import get_airport_coords
 from services.langfuse_client import observe
