@@ -54,23 +54,21 @@ def get_callback_handler() -> CallbackHandler | None:
     return _callback_handler
 
 
-def get_openai_client_class():
-    """Return the OpenAI client class to instantiate, chosen by Langfuse config state.
+def update_current_generation(**kwargs) -> None:
+    """Fail-safe wrapper around the active observation's update method.
 
-    When Langfuse is configured, returns `langfuse.openai.OpenAI` so that completions
-    are auto-instrumented (model/usage/tokens captured on a Langfuse generation span).
-    When unconfigured, returns the plain `openai.OpenAI` class so that importing
-    `langfuse.openai` — which installs a process-wide monkey-patch onto
-    `openai.resources.chat.completions.Completions.create` calling `langfuse.get_client()`
-    on every call — never happens at all, avoiding the repeated "Authentication error"
-    warnings that patch triggers when unconfigured. The import is done lazily, inside
-    this function, so `langfuse.openai` is only ever imported when actually needed.
+    Records model/usage/cost details on the currently active Langfuse
+    observation. No-ops when Langfuse is unconfigured, so call sites can
+    record usage without guarding on `get_langfuse_client()` themselves.
+
+    Note this only ever attaches to a generation-typed observation, which
+    means the calling function must be decorated with
+    `@observe(as_type="generation")` for the usage to reach a span that
+    Langfuse will infer cost on.
     """
-    if _is_configured():
-        from langfuse.openai import OpenAI as LangfuseOpenAI
-        return LangfuseOpenAI
-    from openai import OpenAI
-    return OpenAI
+    client = get_langfuse_client()
+    if client is not None:
+        client.update_current_generation(**kwargs)
 
 
 def observe(
@@ -117,7 +115,7 @@ def observe(
 __all__ = [
     "get_langfuse_client",
     "get_callback_handler",
-    "get_openai_client_class",
+    "update_current_generation",
     "observe",
     "propagate_attributes",
 ]
