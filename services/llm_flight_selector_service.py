@@ -135,7 +135,7 @@ def _candidates_summary(candidates: Optional[list], weather_cache: dict) -> str:
     return "\n".join(lines)
 
 
-@observe(as_type="generation")
+@observe(as_type="generation", capture_input=False, capture_output=False)
 def select_flights(
     round_trip_candidates: Optional[list] = None,
     outbound_candidates: Optional[list] = None,
@@ -154,25 +154,34 @@ def select_flights(
         f"Inbound preferences: {json.dumps(inbound_preference or {})}"
     )
 
+    messages = [
+        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+
     response = client.chat.completions.create(
         model=_MODEL,
-        messages=[
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-        ],
+        messages=messages,
         tools=[_SELECT_TOOL],
         tool_choice={"type": "function", "function": {"name": "select_flights"}},
         timeout=60,
     )
+    message = response.choices[0].message
     update_current_generation(
-        model=_MODEL,
+        model=response.model,
+        input={"tools": [_SELECT_TOOL], "messages": messages},
+        output={
+            "role": message.role,
+            "content": message.content,
+            "tool_calls": [tc.model_dump() for tc in (message.tool_calls or [])],
+        },
         usage_details={
             "input": response.usage.prompt_tokens,
             "output": response.usage.completion_tokens,
         },
         model_parameters={"tool_choice": "select_flights"},
     )
-    args = json.loads(response.choices[0].message.tool_calls[0].function.arguments)
+    args = json.loads(message.tool_calls[0].function.arguments)
     return FlightSelection(
         round_trip_index=args.get("round_trip_index"),
         outbound_index=args.get("outbound_index"),
