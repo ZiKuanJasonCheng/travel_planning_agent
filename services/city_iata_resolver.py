@@ -7,6 +7,7 @@ import urllib.request
 from typing import Optional
 
 from services.geocoding import fetch_coordinates
+from services.langfuse_client import observe
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +203,7 @@ def resolve_city_iata(name: str) -> str:
     return stripped.upper()[:3]
 
 
+@observe()
 def resolve_city_iata_codes(name: str) -> list[str]:
     """Return all major IATA codes for a city.
 

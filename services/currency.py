@@ -7,11 +7,14 @@ import logging
 import urllib.request
 from typing import Optional
 
+from services.langfuse_client import observe
+
 logger = logging.getLogger(__name__)
 
 _rates_cache: Optional[dict] = None
 
 
+@observe()
 def get_rates() -> dict:
     """Return a dict of currency → units-per-1-USD, fetched once and cached."""
     global _rates_cache

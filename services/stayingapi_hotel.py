@@ -12,6 +12,7 @@ from typing import Optional, List, Dict, Any
 from urllib import error, request
 
 from services.currency import to_usd
+from services.langfuse_client import observe
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,7 @@ class StayingAPIHotelService:
             self.api_key = api_key
             self.use_mock = False
 
+    @observe()
     def search_hotels(
         self,
         destination: str,

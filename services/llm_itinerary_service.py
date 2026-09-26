@@ -8,9 +8,13 @@ import logging
 import os
 from typing import Optional
 
-from openai import OpenAI, APIError
+from openai import APIError, OpenAI
+
+from services.langfuse_client import observe, update_current_generation
 
 logger = logging.getLogger(__name__)
+
+_MODEL = "gpt-4o-mini"
 
 
 _ACTIVITY_SCHEMA = """{
@@ -113,7 +117,7 @@ def _day_rules(arrival_time: Optional[str], return_depart_time: Optional[str], d
 class LLMItineraryService:
     def __init__(self):
         api_key = os.getenv("OPENAI_API_KEY")
-        self.client: Optional[OpenAI] = OpenAI(api_key=api_key) if api_key else None
+        self.client = OpenAI(api_key=api_key) if api_key else None
 
     def generate_itinerary(
         self,
@@ -229,14 +233,26 @@ Respond ONLY with valid JSON matching this structure:
 
         return self._call_llm(prompt, context="update_itinerary")
 
+    @observe(as_type="generation")
     def _call_llm(self, prompt: str, context: str) -> list[dict]:
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.7,
                 response_format={"type": "json_object"},
                 timeout=180,
+            )
+            update_current_generation(
+                model=_MODEL,
+                usage_details={
+                    "input": response.usage.prompt_tokens,
+                    "output": response.usage.completion_tokens,
+                },
+                model_parameters={
+                    "temperature": 0.7,
+                    "response_format": "json_object",
+                },
             )
             parsed = json.loads(response.choices[0].message.content)
             return self._normalize(parsed.get("itinerary", []))

@@ -9,6 +9,7 @@ def default_transport_options() -> dict:
 
 class TripState(TypedDict, total=False):
     session_id: Optional[str]
+    log_file: Optional[str]
     destination: str
     origin: str               # departure city / location
     num_people: int           # total number of travelers

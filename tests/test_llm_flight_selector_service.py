@@ -23,6 +23,8 @@ def _mock_openai_response(round_trip_index, outbound_index, inbound_index, reaso
     choice.message = message
     response = MagicMock()
     response.choices = [choice]
+    response.usage.prompt_tokens = 120
+    response.usage.completion_tokens = 18
     return response
 
 

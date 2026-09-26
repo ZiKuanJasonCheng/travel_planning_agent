@@ -8,9 +8,12 @@ from states.trip_state import TripState
 import os
 
 from services.currency import get_rates
+from services.langfuse_client import observe, update_current_generation
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 logger = logging.getLogger(__name__)
+
+_MODEL = "gpt-4o-mini"
 
 _SYSTEM_PROMPT_TEMPLATE = """
 You are an experienced travel assistant that extracts structured constraints from user feedback.
@@ -27,6 +30,7 @@ def _build_system_prompt() -> str:
     return _SYSTEM_PROMPT_TEMPLATE.format(rates_json=json.dumps(rates, indent=2))
 
 
+@observe(as_type="generation")
 def parse_feedback_with_llm(feedback: str) -> Optional[Constraints]:
     """Parse feedback with LLM into a constraint object. All price values are normalized to USD."""
     if not feedback:
@@ -34,7 +38,7 @@ def parse_feedback_with_llm(feedback: str) -> Optional[Constraints]:
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=_MODEL,
             messages=[
                 {"role": "system", "content": _build_system_prompt()},
                 {"role": "user", "content": feedback}
@@ -54,6 +58,18 @@ def parse_feedback_with_llm(feedback: str) -> Optional[Constraints]:
         logger.error(f"parse_feedback_with_llm: error parsing feedback by LLM because of LLM service error: {e}")
         # TODO: Retry 3 times with exponential backoff
         raise
+
+    update_current_generation(
+        model=_MODEL,
+        usage_details={
+            "input": response.usage.prompt_tokens,
+            "output": response.usage.completion_tokens,
+        },
+        model_parameters={
+            "temperature": 0,
+            "tool_choice": "extract_constraints",
+        },
+    )
 
     try:
         tool_call = response.choices[0].message.tool_calls[0]
