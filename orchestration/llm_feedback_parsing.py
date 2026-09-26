@@ -30,26 +30,31 @@ def _build_system_prompt() -> str:
     return _SYSTEM_PROMPT_TEMPLATE.format(rates_json=json.dumps(rates, indent=2))
 
 
-@observe(as_type="generation")
+_EXTRACT_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "extract_constraints",
+        "parameters": Constraints.model_json_schema(),
+    },
+}
+
+
+@observe(as_type="generation", capture_input=False, capture_output=False)
 def parse_feedback_with_llm(feedback: str) -> Optional[Constraints]:
     """Parse feedback with LLM into a constraint object. All price values are normalized to USD."""
     if not feedback:
         return None
 
+    messages = [
+        {"role": "system", "content": _build_system_prompt()},
+        {"role": "user", "content": feedback},
+    ]
+
     try:
         response = client.chat.completions.create(
             model=_MODEL,
-            messages=[
-                {"role": "system", "content": _build_system_prompt()},
-                {"role": "user", "content": feedback}
-            ],
-            tools=[{
-                "type": "function",
-                "function": {
-                    "name": "extract_constraints",
-                    "parameters": Constraints.model_json_schema()
-                }
-            }],
+            messages=messages,
+            tools=[_EXTRACT_TOOL],
             tool_choice={"type": "function", "function": {"name": "extract_constraints"}},
             timeout=60,
             temperature=0
@@ -59,8 +64,15 @@ def parse_feedback_with_llm(feedback: str) -> Optional[Constraints]:
         # TODO: Retry 3 times with exponential backoff
         raise
 
+    message = response.choices[0].message
     update_current_generation(
-        model=_MODEL,
+        model=response.model,
+        input={"tools": [_EXTRACT_TOOL], "messages": messages},
+        output={
+            "role": message.role,
+            "content": message.content,
+            "tool_calls": [tc.model_dump() for tc in (message.tool_calls or [])],
+        },
         usage_details={
             "input": response.usage.prompt_tokens,
             "output": response.usage.completion_tokens,
@@ -72,7 +84,7 @@ def parse_feedback_with_llm(feedback: str) -> Optional[Constraints]:
     )
 
     try:
-        tool_call = response.choices[0].message.tool_calls[0]
+        tool_call = message.tool_calls[0]
         args = tool_call.function.arguments
         logger.info(f"parse_feedback_with_llm(): args: {args}")
 

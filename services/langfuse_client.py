@@ -65,6 +65,12 @@ def update_current_generation(**kwargs) -> None:
     means the calling function must be decorated with
     `@observe(as_type="generation")` for the usage to reach a span that
     Langfuse will infer cost on.
+
+    Call sites that pass `input`/`output` here (to record OpenAI-shaped
+    payloads the UI renders as chat messages and tool cards) must also
+    decorate with `capture_input=False, capture_output=False`: the
+    decorator writes `output` after the function returns, which would
+    silently overwrite a manually-set output.
     """
     client = get_langfuse_client()
     if client is not None:

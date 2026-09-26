@@ -233,18 +233,22 @@ Respond ONLY with valid JSON matching this structure:
 
         return self._call_llm(prompt, context="update_itinerary")
 
-    @observe(as_type="generation")
+    @observe(as_type="generation", capture_input=False, capture_output=False)
     def _call_llm(self, prompt: str, context: str) -> list[dict]:
         try:
+            messages = [{"role": "user", "content": prompt}]
             response = self.client.chat.completions.create(
                 model=_MODEL,
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
                 temperature=0.7,
                 response_format={"type": "json_object"},
                 timeout=180,
             )
+            message = response.choices[0].message
             update_current_generation(
-                model=_MODEL,
+                model=response.model,
+                input=messages,
+                output={"role": message.role, "content": message.content},
                 usage_details={
                     "input": response.usage.prompt_tokens,
                     "output": response.usage.completion_tokens,
@@ -254,7 +258,7 @@ Respond ONLY with valid JSON matching this structure:
                     "response_format": "json_object",
                 },
             )
-            parsed = json.loads(response.choices[0].message.content)
+            parsed = json.loads(message.content)
             return self._normalize(parsed.get("itinerary", []))
         except APIError as e:
             logger.error(f"LLMItineraryService.{context}() OpenAI API error: {e}")
