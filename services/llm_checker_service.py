@@ -4,6 +4,10 @@ from typing import Optional, TypedDict
 
 from openai import OpenAI
 
+from services.currency import CONVERT_CURRENCY_TOOL, execute_tool_call
+
+_MAX_TOOL_ITERATIONS = 3
+
 
 class CheckerResult(TypedDict):
     passed: bool
@@ -47,11 +51,61 @@ to judge what is reasonable (2-hour drives are normal in Iceland, not in central
 3. Constraint violations — if traveler constraints are provided, verify:
    - Exclusions: no excluded venues, styles, or activity types appear.
    - Must-visit places: every listed must-visit place appears at least once.
-   - Budget: no activity's estimated_cost significantly exceeds the max price per ticket \
-(use your knowledge to convert local currency to USD for comparison).
+   - Budget: no activity's estimated_cost significantly exceeds the max price per ticket. \
+Activity costs are in their own local currency while the max price per ticket is in USD — \
+call convert_currency to convert a cost to USD before comparing it, never compare the raw \
+local-currency number against the USD limit.
    - Preferred styles: the overall mix of activities matches the stated travel styles.
 Only flag a constraint violation if you are confident it is breached.
-Be specific so the planner can act on each issue."""
+Be specific so the planner can act on each issue.
+When you have finished reviewing, call evaluate_itinerary with your verdict."""
+
+
+def _evaluate_with_tools(client: OpenAI, messages: list) -> dict:
+    """Run a bounded tool loop until the model calls evaluate_itinerary.
+
+    The model may call convert_currency one or more times before deciding; on the
+    final allowed iteration the terminal tool is forced so the call can never
+    end without a verdict.
+    """
+    tools = [CONVERT_CURRENCY_TOOL, _EVALUATE_TOOL]
+
+    for iteration in range(_MAX_TOOL_ITERATIONS):
+        last_chance = iteration == _MAX_TOOL_ITERATIONS - 1
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            tools=tools,
+            tool_choice=(
+                {"type": "function", "function": {"name": "evaluate_itinerary"}}
+                if last_chance else "auto"
+            ),
+            timeout=60,
+        )
+        message = response.choices[0].message
+        tool_calls = message.tool_calls or []
+
+        for tc in tool_calls:
+            if tc.function.name == "evaluate_itinerary":
+                return json.loads(tc.function.arguments)
+
+        if not tool_calls:
+            messages.append({"role": "user", "content": "Call evaluate_itinerary with your verdict."})
+            continue
+
+        messages.append({
+            "role": "assistant",
+            "content": message.content,
+            "tool_calls": [tc.model_dump() for tc in tool_calls],
+        })
+        for tc in tool_calls:
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "content": execute_tool_call(tc.function.name, tc.function.arguments),
+            })
+
+    raise ValueError("evaluate_itinerary: model did not return a verdict tool call")
 
 
 def _build_constraints_lines(constraints: dict) -> str:
@@ -90,17 +144,11 @@ def evaluate_itinerary(
     if prior_critique:
         user_content += f"\n\nPrevious critique to verify is now resolved:\n{prior_critique}"
 
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-        ],
-        tools=[_EVALUATE_TOOL],
-        tool_choice={"type": "function", "function": {"name": "evaluate_itinerary"}},
-        timeout=60,
-    )
-    args = json.loads(response.choices[0].message.tool_calls[0].function.arguments)
+    messages = [
+        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+    args = _evaluate_with_tools(client, messages)
     return CheckerResult(
         passed=args["passed"],
         issues=args.get("issues", []),

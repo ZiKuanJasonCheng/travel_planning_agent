@@ -35,5 +35,7 @@ class TripState(TypedDict, total=False):
 
     status: Literal["planning", "is_waiting_for_feedback", "completed"]
 
+    final_output: Optional[dict]   # Client-facing payload built by final_output_node
+
     checker_retry_count: int
     checker_critique: Optional[str]

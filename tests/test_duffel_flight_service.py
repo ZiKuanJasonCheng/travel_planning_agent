@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 from urllib import error as urllib_error
 
+from services import duffel_flight
 from services.duffel_flight import _apply_leg_prices, _passes_preference, _cache_key, _parse_segment
 
 
@@ -25,6 +26,16 @@ class ApplyLegPricesTests(unittest.TestCase):
         legs = [{"airline": "CX"}]
         _apply_leg_prices(legs, 500.0)
         self.assertNotIn("price", legs[0])
+
+    def test_stamps_currency_on_every_leg(self):
+        legs = [{"airline": "CX"}, {"airline": "CX"}]
+        priced = _apply_leg_prices(legs, 278.83, currency="JPY")
+        self.assertEqual(priced[0]["currency"], "JPY")
+        self.assertEqual(priced[1]["currency"], "JPY")
+
+    def test_currency_defaults_to_usd(self):
+        priced = _apply_leg_prices([{"airline": "CX"}], 500.0)
+        self.assertEqual(priced[0]["currency"], "USD")
 
 
 class PassesPreferenceTests(unittest.TestCase):
@@ -61,6 +72,32 @@ class PassesPreferenceTests(unittest.TestCase):
     def test_max_price_per_ticket_passes_when_within_budget(self):
         pref = {"max_price_per_ticket": 300}
         self.assertTrue(_passes_preference(self._legs(price=200), pref))
+
+    def test_budget_check_converts_leg_currency_to_usd(self):
+        # 20,000 JPY at 200 JPY per USD is 100 USD, comfortably under the cap.
+        legs = [{"airline": "CX", "depart_time": "10:00:00", "price": 20000, "currency": "JPY"}]
+        with patch.object(duffel_flight, "to_usd", return_value=100.0) as mock_to_usd:
+            passed = _passes_preference(legs, {"max_price_per_ticket": 300})
+
+        self.assertTrue(passed)
+        mock_to_usd.assert_called_once_with(20000, "JPY")
+
+    def test_non_usd_offer_exceeding_cap_is_rejected(self):
+        # 500,000 JPY is 2,500 USD at 200 JPY/USD — over the 1,000 USD cap even
+        # though the raw number alone would look like it passes a naive check.
+        legs = [{"airline": "CX", "depart_time": "10:00:00", "price": 500000, "currency": "JPY"}]
+        with patch.object(duffel_flight, "to_usd", return_value=2500.0):
+            passed = _passes_preference(legs, {"max_price_per_ticket": 1000})
+
+        self.assertFalse(passed)
+
+    def test_legs_without_currency_are_treated_as_usd(self):
+        legs = [{"airline": "CX", "depart_time": "10:00:00", "price": 500}]
+        with patch.object(duffel_flight, "to_usd", return_value=500.0) as mock_to_usd:
+            passed = _passes_preference(legs, {"max_price_per_ticket": 1000})
+
+        self.assertTrue(passed)
+        mock_to_usd.assert_called_once_with(500, "USD")
 
 
 class CacheKeyTests(unittest.TestCase):
@@ -115,6 +152,8 @@ class MockFlightSearchTests(unittest.TestCase):
             self.assertIn("inbound_legs", candidate)
             self.assertTrue(all("price" in leg for leg in candidate["outbound_legs"]))
             self.assertTrue(all("price" in leg for leg in candidate["inbound_legs"]))
+            self.assertTrue(all("currency" in leg for leg in candidate["outbound_legs"]))
+            self.assertTrue(all("currency" in leg for leg in candidate["inbound_legs"]))
 
     def test_one_way_mock_has_no_inbound_legs(self):
         service = self._service()
@@ -212,6 +251,9 @@ class SearchFlightsTests(unittest.TestCase):
         self.assertEqual(candidate["inbound_legs"][0]["price"], 300)
         self.assertEqual(candidate["stops_outbound"], 0)
         self.assertEqual(candidate["stops_inbound"], 0)
+        # Each leg carries its own currency so downstream budget checks can convert.
+        self.assertEqual(candidate["outbound_legs"][0]["currency"], "USD")
+        self.assertEqual(candidate["inbound_legs"][0]["currency"], "USD")
 
         # Cache populated
         self.assertEqual(len(service._cache), 1)
