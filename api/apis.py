@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List
 from datetime import date, timedelta
 from states.trip_state import TripState, default_transport_options
+from agents.final_output import final_output_node
 from orchestration.human_feedback import apply_user_feedback
 from orchestration.graph_runner import run_until_needing_feedback_or_finished
 from orchestration.llm_feedback_parsing import parse_feedback_with_llm
@@ -108,15 +109,12 @@ def start_trip(param: RequestModel):
     session_id = create_session(state)
     state["session_id"] = session_id  # Agents might use session_id
     state = run_until_needing_feedback_or_finished(state)
+
+    final_output = state.pop("final_output")  # client-facing payload — never persisted
     update_session(session_id, state)
 
-    format_state_before_return(state)
     logger.info(f"start_trip(): completed with status={state['status']}")
-    return {
-        "session_id": session_id,
-        "status": state["status"],
-        "state": state
-    }
+    return {"status": state["status"], **final_output}
 
 
 @router.post("/trip/feedback")  # /trip/{session_id}/feedback
@@ -145,30 +143,20 @@ def submit_feedback(param: FeedbackModel):
 
     if not changed:
         state["status"] = "completed"
+        # The graph didn't run this round and the previous response popped
+        # final_output before persisting, so rebuild it. Nothing changed, so the
+        # reminder LLM writes a closing line instead of scanning for problems.
+        final_output = final_output_node(state, closing_reminder=True)["final_output"]
         update_session(param.session_id, state)
         logger.info(f"submit_feedback(): completed with status={state['status']}")
-        return {
-            "session_id": param.session_id,
-            "status": state["status"],
-            "final_state": state,
-        }
+        return {"status": state["status"], **final_output}
 
     state["status"] = "planning"
     # Keep running the graph until needing feedback or finished
     state = run_until_needing_feedback_or_finished(state)
+
+    final_output = state.pop("final_output")  # client-facing payload — never persisted
     update_session(param.session_id, state)
 
-    format_state_before_return(state)
     logger.info(f"submit_feedback(): completed with status={state['status']}")
-    return {
-        "session_id": param.session_id,
-        "status": state["status"],
-        "state": state
-    }
-
-
-def format_state_before_return(state: TripState):
-    # Remove some fields from state before returned as API response
-    state.pop("log_trace")
-    state.pop("traces")
-    state.pop("session_id")
+    return {"status": state["status"], **final_output}

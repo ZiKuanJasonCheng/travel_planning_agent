@@ -5,10 +5,13 @@ from typing import Optional, TypedDict
 from openai import OpenAI
 
 from services.city_iata_resolver import get_airport_coords
+from services.currency import CONVERT_CURRENCY_TOOL, execute_tool_call
 from services.langfuse_client import observe, update_current_generation
 from services.weather_mcp_service import get_weather_service, is_within_forecast_horizon
 
 _MODEL = "gpt-4o-mini"
+
+_MAX_TOOL_ITERATIONS = 3
 
 
 class FlightSelection(TypedDict):
@@ -56,7 +59,13 @@ When a candidate's departure-hour weather forecast is shown, prefer candidates d
 into better weather when the other factors are otherwise comparable, but don't sacrifice \
 a clearly better price or schedule solely to avoid mediocre weather. Not every candidate \
 will have weather data available; treat its absence as neutral, not a strike against it. \
-Explain your choice briefly in the reason field."""
+Explain your choice briefly in the reason field.
+
+Candidate prices are shown in each candidate's own currency, but any budget limit in the \
+traveler's preferences (max_price_per_ticket) is denominated in USD. Call convert_currency \
+to convert a price into USD before comparing it against that limit — never compare a \
+non-USD price numerically against a USD budget. When you are done deliberating, call \
+select_flights with your final choice."""
 
 
 def _weather_text(from_iata: str, departure_date: str, depart_time: str, cache: dict) -> str:
@@ -117,7 +126,9 @@ def _candidates_summary(candidates: Optional[list], weather_cache: dict) -> str:
             f"[{i}] price={c.get('price')} {c.get('currency', '')}, "
             f"outbound: {first_out.get('airline')} {first_out.get('from')}->{last_out.get('to')} "
             f"depart {first_out.get('depart_time')} arrive {last_out.get('arrival_time')} "
-            f"({c.get('stops_outbound', 0)} stop(s)){outbound_weather}"
+            f"({c.get('stops_outbound', 0)} stop(s), "
+            f"leg price {first_out.get('price')} {first_out.get('currency') or c.get('currency', '')})"
+            f"{outbound_weather}"
         )
         if inbound:
             first_in = inbound[0]
@@ -129,7 +140,9 @@ def _candidates_summary(candidates: Optional[list], weather_cache: dict) -> str:
             summary += (
                 f"; inbound: {first_in.get('airline')} {first_in.get('from')}->{last_in.get('to')} "
                 f"depart {first_in.get('depart_time')} arrive {last_in.get('arrival_time')} "
-                f"({c.get('stops_inbound', 0)} stop(s)){inbound_weather}"
+                f"({c.get('stops_inbound', 0)} stop(s), "
+                f"leg price {first_in.get('price')} {first_in.get('currency') or c.get('currency', '')})"
+                f"{inbound_weather}"
             )
         lines.append(summary)
     return "\n".join(lines)
@@ -159,29 +172,75 @@ def select_flights(
         {"role": "user", "content": user_content},
     ]
 
-    response = client.chat.completions.create(
-        model=_MODEL,
-        messages=messages,
-        tools=[_SELECT_TOOL],
-        tool_choice={"type": "function", "function": {"name": "select_flights"}},
-        timeout=60,
-    )
-    message = response.choices[0].message
-    update_current_generation(
-        model=response.model,
-        input={"tools": [_SELECT_TOOL], "messages": messages},
-        output={
-            "role": message.role,
+    tools = [CONVERT_CURRENCY_TOOL, _SELECT_TOOL]
+    total_prompt_tokens = 0
+    total_completion_tokens = 0
+    last_model = _MODEL
+    final_message = None
+
+    for iteration in range(_MAX_TOOL_ITERATIONS):
+        # On the last allowed iteration, force the terminal tool so a model that
+        # keeps calling convert_currency can never exhaust the loop unselected.
+        last_chance = iteration == _MAX_TOOL_ITERATIONS - 1
+        response = client.chat.completions.create(
+            model=_MODEL,
+            messages=messages,
+            tools=tools,
+            tool_choice=(
+                {"type": "function", "function": {"name": "select_flights"}}
+                if last_chance else "auto"
+            ),
+            timeout=60,
+        )
+        message = response.choices[0].message
+        last_model = response.model
+        total_prompt_tokens += response.usage.prompt_tokens
+        total_completion_tokens += response.usage.completion_tokens
+        final_message = message
+
+        tool_calls = message.tool_calls or []
+        if any(tc.function.name == "select_flights" for tc in tool_calls):
+            break
+
+        if not tool_calls:
+            # Model answered in prose instead of calling a tool — re-prompt with the
+            # terminal tool forced rather than crashing on a missing tool call.
+            messages.append({"role": "user", "content": "Call select_flights with your final choice."})
+            continue
+
+        messages.append({
+            "role": "assistant",
             "content": message.content,
-            "tool_calls": [tc.model_dump() for tc in (message.tool_calls or [])],
+            "tool_calls": [tc.model_dump() for tc in tool_calls],
+        })
+        for tc in tool_calls:
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "content": execute_tool_call(tc.function.name, tc.function.arguments),
+            })
+
+    select_calls = [
+        tc for tc in (final_message.tool_calls or []) if tc.function.name == "select_flights"
+    ]
+    if not select_calls:
+        raise ValueError("select_flights: model did not return a flight selection tool call")
+
+    update_current_generation(
+        model=last_model,
+        input={"tools": tools, "messages": messages},
+        output={
+            "role": final_message.role,
+            "content": final_message.content,
+            "tool_calls": [tc.model_dump() for tc in (final_message.tool_calls or [])],
         },
         usage_details={
-            "input": response.usage.prompt_tokens,
-            "output": response.usage.completion_tokens,
+            "input": total_prompt_tokens,
+            "output": total_completion_tokens,
         },
-        model_parameters={"tool_choice": "select_flights"},
+        model_parameters={"tool_choice": "auto"},
     )
-    args = json.loads(message.tool_calls[0].function.arguments)
+    args = json.loads(select_calls[0].function.arguments)
     return FlightSelection(
         round_trip_index=args.get("round_trip_index"),
         outbound_index=args.get("outbound_index"),

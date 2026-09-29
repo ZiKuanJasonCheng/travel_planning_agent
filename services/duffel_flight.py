@@ -9,6 +9,7 @@ import time
 from typing import Optional, List, Dict, Any
 from urllib import error, request
 
+from services.currency import to_usd
 from services.langfuse_client import observe
 
 logger = logging.getLogger(__name__)
@@ -42,12 +43,15 @@ def _matches_timeslots(depart_time_str: str, timeslots: list[str]) -> bool:
         return True  # Unparseable timeslot -> Don't filter
 
 
-def _apply_leg_prices(legs: List[Dict[str, Any]], direction_total: float) -> List[Dict[str, Any]]:
-    """Divide direction_total evenly across legs, returning new dicts with a 'price' key added."""
+def _apply_leg_prices(
+    legs: List[Dict[str, Any]], direction_total: float, currency: str = "USD"
+) -> List[Dict[str, Any]]:
+    """Divide direction_total evenly across legs, returning new dicts with 'price' and
+    'currency' keys added so each leg's price is self-describing downstream."""
     if not legs:
         return []
     per_leg_price = direction_total / len(legs)
-    return [{**leg, "price": int(round(per_leg_price))} for leg in legs]
+    return [{**leg, "price": int(round(per_leg_price)), "currency": currency} for leg in legs]
 
 
 def _passes_preference(legs: List[Dict[str, Any]], preference: Optional[Dict[str, Any]]) -> bool:
@@ -81,8 +85,12 @@ def _passes_preference(legs: List[Dict[str, Any]], preference: Optional[Dict[str
 
     max_price_per_ticket = preference.get("max_price_per_ticket")
     if max_price_per_ticket is not None:
-        direction_total_price = sum(leg.get("price", 0) for leg in legs)
-        if direction_total_price > max_price_per_ticket:
+        # max_price_per_ticket comes from user constraints and is denominated in USD,
+        # while leg prices are in the offer's own currency — convert before comparing.
+        direction_total_usd = sum(
+            to_usd(leg.get("price", 0), leg.get("currency") or "USD") for leg in legs
+        )
+        if direction_total_usd > max_price_per_ticket:
             return False
 
     return True
@@ -259,8 +267,10 @@ class DuffelFlightService:
             else:
                 outbound_total, inbound_total = total_price, None
 
-            outbound_legs = _apply_leg_prices(outbound_legs_raw, outbound_total)
-            inbound_legs = _apply_leg_prices(inbound_legs_raw, inbound_total) if inbound_legs_raw else None
+            outbound_legs = _apply_leg_prices(outbound_legs_raw, outbound_total, currency)
+            inbound_legs = (
+                _apply_leg_prices(inbound_legs_raw, inbound_total, currency) if inbound_legs_raw else None
+            )
 
             if not _passes_preference(outbound_legs, outbound_preference):
                 return None
@@ -320,14 +330,17 @@ class DuffelFlightService:
             outbound_legs_raw = c["outbound_legs_raw"]
             inbound_legs_raw = c["inbound_legs_raw"]
             total_price = c["price"]
+            currency = c["currency"]
 
             if inbound_legs_raw:
                 outbound_total, inbound_total = total_price / 2, total_price / 2
             else:
                 outbound_total, inbound_total = total_price, None
 
-            outbound_legs = _apply_leg_prices(outbound_legs_raw, outbound_total)
-            inbound_legs = _apply_leg_prices(inbound_legs_raw, inbound_total) if inbound_legs_raw else None
+            outbound_legs = _apply_leg_prices(outbound_legs_raw, outbound_total, currency)
+            inbound_legs = (
+                _apply_leg_prices(inbound_legs_raw, inbound_total, currency) if inbound_legs_raw else None
+            )
 
             if not _passes_preference(outbound_legs, outbound_preference):
                 continue
@@ -336,7 +349,7 @@ class DuffelFlightService:
 
             results.append({
                 "price": int(total_price),
-                "currency": c["currency"],
+                "currency": currency,
                 "outbound_legs": outbound_legs,
                 "inbound_legs": inbound_legs,
                 "stops_outbound": len(outbound_legs) - 1,

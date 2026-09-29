@@ -4,6 +4,7 @@ from agents.transport import transport_agent
 from agents.accommodation import accommodation_agent
 from agents.attraction import attraction_agent
 from agents.checker import checker_agent
+from agents.final_output import final_output_node
 from orchestration.decision import determine_next_step, buffer_step
 from orchestration.human_feedback import human_feedback_checkpoint  #human_feedback_node
 
@@ -17,6 +18,7 @@ def build_graph():
     builder.add_node("accommodation", accommodation_agent)
     builder.add_node("attraction", attraction_agent)
     builder.add_node("checker", checker_agent)
+    builder.add_node("final_output", final_output_node)
     builder.add_node("human_feedback", human_feedback_checkpoint)
     builder.add_node("determine_next_step", determine_next_step)
     builder.add_node("buffer_step", buffer_step)
@@ -33,6 +35,7 @@ def build_graph():
             "accommodation_agent": "accommodation",
             "attraction_agent": "attraction",
             "checker_agent": "checker",
+            "final_output": "final_output",
             "human_feedback": "human_feedback"
         }
     )
@@ -43,6 +46,8 @@ def build_graph():
     builder.add_edge("attraction", "buffer_step")
     builder.add_edge("checker", "buffer_step")
 
+    # Format the client-facing payload, then pause for user feedback
+    builder.add_edge("final_output", "human_feedback")
     builder.add_edge("human_feedback", END)
 
     # Compile graph

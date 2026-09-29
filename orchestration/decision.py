@@ -9,7 +9,7 @@ def determine_next_step(state: TripState):
     print(f"dirty_agents: {dirty_agents}")
 
     if not dirty_agents:
-        return "human_feedback"
+        return "final_output"
 
     next_agent = dirty_agents.pop(0)
     #state["dirty_agents"] = dirty_agents

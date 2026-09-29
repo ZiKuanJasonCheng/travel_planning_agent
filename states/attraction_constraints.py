@@ -5,7 +5,7 @@ from orchestration.merge_constraints import UNLIMITED_PRICE
 
 
 class PreferenceConstraint(BaseModel):
-    styles: Optional[list[str]] = Field(None, description="Preferred tourism styles e.g. natural scenery, historical sites, shopping, culture experiences, local food, etc.")
+    styles: Optional[list[str]] = Field(None, description="Preferred tourism styles or things to do e.g. natural scenery, historical sites, shopping, culture experiences, local food, etc. Also include additional constraints if user specifies, for example, 'shopping at least one day', 'museum only for two days', etc.")
     exclusions: Optional[list[str]] = Field(None, description="Places, styles, or things to exclude e.g. Instagrammable spot, spicy food, etc.")
     must_go_places: Optional[list[str]] = Field(None, description="Some must-go places if specified")
     max_price_per_ticket: Optional[int] = Field(

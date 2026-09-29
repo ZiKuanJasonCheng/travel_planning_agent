@@ -8,6 +8,8 @@ class LLMCheckerServiceTests(unittest.TestCase):
     def _mock_openai_response(self, passed, issues, critique):
         args = json.dumps({"passed": passed, "issues": issues, "critique": critique})
         tool_call = MagicMock()
+        tool_call.id = "call_evaluate"
+        tool_call.function.name = "evaluate_itinerary"
         tool_call.function.arguments = args
         message = MagicMock()
         message.tool_calls = [tool_call]
@@ -79,6 +81,98 @@ class LLMCheckerServiceTests(unittest.TestCase):
         messages = call_args.kwargs["messages"]
         user_message = next(m for m in messages if m["role"] == "user")
         self.assertIn("Fix the duplicate Fushimi Inari visit.", user_message["content"])
+
+
+def _tool_call(name, arguments, call_id="call-1"):
+    tc = MagicMock()
+    tc.id = call_id
+    tc.function.name = name
+    tc.function.arguments = arguments
+    tc.model_dump.return_value = {
+        "id": call_id,
+        "type": "function",
+        "function": {"name": name, "arguments": arguments},
+    }
+    return tc
+
+
+def _response_with_tool_calls(*tool_calls):
+    message = MagicMock()
+    message.tool_calls = list(tool_calls)
+    message.content = None
+    choice = MagicMock()
+    choice.message = message
+    response = MagicMock()
+    response.choices = [choice]
+    return response
+
+
+_CONVERT_CALL = _tool_call(
+    "convert_currency",
+    json.dumps({"amount": 20000, "from_currency": "JPY", "to_currency": "USD"}),
+)
+
+
+class CheckerConvertCurrencyToolLoopTests(unittest.TestCase):
+    """The checker may call convert_currency before returning a verdict."""
+
+    def setUp(self):
+        patcher = patch("services.currency.get_rates", return_value={"USD": 1.0, "JPY": 200.0})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    @patch("services.llm_checker_service.OpenAI")
+    def test_conversion_then_verdict_resolves_to_verdict(self, mock_openai_cls):
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = [
+            _response_with_tool_calls(_CONVERT_CALL),
+            _response_with_tool_calls(_tool_call(
+                "evaluate_itinerary",
+                json.dumps({"passed": False, "issues": ["Over budget"], "critique": "Trim Day 2"}),
+            )),
+        ]
+
+        from services.llm_checker_service import evaluate_itinerary
+        result = evaluate_itinerary(destination="Tokyo", days=3, num_people=2, itinerary=[])
+
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["issues"], ["Over budget"])
+        self.assertEqual(mock_client.chat.completions.create.call_count, 2)
+
+    @patch("services.llm_checker_service.OpenAI")
+    def test_iteration_cap_forces_the_terminal_tool(self, mock_openai_cls):
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+        # The model keeps converting and never returns a verdict on its own.
+        mock_client.chat.completions.create.side_effect = [
+            _response_with_tool_calls(_CONVERT_CALL),
+            _response_with_tool_calls(_CONVERT_CALL),
+            _response_with_tool_calls(_tool_call(
+                "evaluate_itinerary",
+                json.dumps({"passed": True, "issues": [], "critique": ""}),
+            )),
+        ]
+
+        from services.llm_checker_service import evaluate_itinerary
+        result = evaluate_itinerary(destination="Tokyo", days=3, num_people=2, itinerary=[])
+
+        self.assertTrue(result["passed"])
+        last_kwargs = mock_client.chat.completions.create.call_args_list[-1].kwargs
+        self.assertEqual(
+            last_kwargs["tool_choice"],
+            {"type": "function", "function": {"name": "evaluate_itinerary"}},
+        )
+
+    @patch("services.llm_checker_service.OpenAI")
+    def test_raises_when_no_verdict_ever_arrives(self, mock_openai_cls):
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+        mock_client.chat.completions.create.return_value = _response_with_tool_calls(_CONVERT_CALL)
+
+        from services.llm_checker_service import evaluate_itinerary
+        with self.assertRaises(ValueError):
+            evaluate_itinerary(destination="Tokyo", days=3, num_people=2, itinerary=[])
 
 
 def _base_state(retry_count=0, critique=None, dirty_agents=None):

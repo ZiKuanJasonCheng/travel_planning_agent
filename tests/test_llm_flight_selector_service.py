@@ -16,6 +16,8 @@ def _mock_openai_response(round_trip_index, outbound_index, inbound_index, reaso
         "reason": reason,
     })
     tool_call = MagicMock()
+    tool_call.id = "call_select"
+    tool_call.function.name = "select_flights"
     tool_call.function.arguments = args
     message = MagicMock()
     message.tool_calls = [tool_call]
@@ -26,6 +28,126 @@ def _mock_openai_response(round_trip_index, outbound_index, inbound_index, reaso
     response.usage.prompt_tokens = 120
     response.usage.completion_tokens = 18
     return response
+
+
+def _tool_call(name, arguments, call_id="call-1"):
+    tc = MagicMock()
+    tc.id = call_id
+    tc.function.name = name
+    tc.function.arguments = arguments
+    tc.model_dump.return_value = {
+        "id": call_id,
+        "type": "function",
+        "function": {"name": name, "arguments": arguments},
+    }
+    return tc
+
+
+def _response_with_tool_calls(*tool_calls):
+    message = MagicMock()
+    message.tool_calls = list(tool_calls)
+    message.content = None
+    choice = MagicMock()
+    choice.message = message
+    response = MagicMock()
+    response.choices = [choice]
+    response.model = "gpt-4o"
+    response.usage.prompt_tokens = 100
+    response.usage.completion_tokens = 10
+    return response
+
+
+_CONVERT_CALL = _tool_call(
+    "convert_currency",
+    json.dumps({"amount": 20000, "from_currency": "JPY", "to_currency": "USD"}),
+)
+
+
+class ConvertCurrencyToolLoopTests(unittest.TestCase):
+    """The selector may call convert_currency before committing to a selection."""
+
+    def setUp(self):
+        patcher = patch("services.currency.get_rates", return_value={"USD": 1.0, "JPY": 200.0})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    @patch("services.llm_flight_selector_service.OpenAI")
+    def test_conversion_then_selection_resolves_to_selection(self, mock_openai_cls):
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = [
+            _response_with_tool_calls(_CONVERT_CALL),
+            _mock_openai_response(0, None, None, "Converted price is within budget"),
+        ]
+
+        from services.llm_flight_selector_service import select_flights
+        result = select_flights(
+            round_trip_candidates=[{"price": 20000, "currency": "JPY"}],
+            outbound_preference={}, inbound_preference={},
+        )
+
+        self.assertEqual(result["round_trip_index"], 0)
+        self.assertEqual(mock_client.chat.completions.create.call_count, 2)
+
+    @patch("services.llm_flight_selector_service.OpenAI")
+    def test_conversion_result_is_fed_back_to_the_model(self, mock_openai_cls):
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = [
+            _response_with_tool_calls(_CONVERT_CALL),
+            _mock_openai_response(0, None, None, "ok"),
+        ]
+
+        from services.llm_flight_selector_service import select_flights
+        select_flights(
+            round_trip_candidates=[{"price": 20000, "currency": "JPY"}],
+            outbound_preference={}, inbound_preference={},
+        )
+
+        second_messages = mock_client.chat.completions.create.call_args_list[1].kwargs["messages"]
+        tool_messages = [m for m in second_messages if m.get("role") == "tool"]
+        self.assertEqual(len(tool_messages), 1)
+        payload = json.loads(tool_messages[0]["content"])
+        # 20,000 JPY at 200 JPY/USD is 100 USD.
+        self.assertEqual(payload["result"], 100.0)
+
+    @patch("services.llm_flight_selector_service.OpenAI")
+    def test_iteration_cap_forces_the_terminal_tool(self, mock_openai_cls):
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+        # The model keeps converting and never selects on its own; the cap must
+        # force the terminal tool on the final allowed iteration.
+        mock_client.chat.completions.create.side_effect = [
+            _response_with_tool_calls(_CONVERT_CALL),
+            _response_with_tool_calls(_CONVERT_CALL),
+            _mock_openai_response(1, None, None, "forced"),
+        ]
+
+        from services.llm_flight_selector_service import select_flights
+        result = select_flights(
+            round_trip_candidates=[{"price": 500}, {"price": 700}],
+            outbound_preference={}, inbound_preference={},
+        )
+
+        self.assertEqual(result["round_trip_index"], 1)
+        last_kwargs = mock_client.chat.completions.create.call_args_list[-1].kwargs
+        self.assertEqual(
+            last_kwargs["tool_choice"],
+            {"type": "function", "function": {"name": "select_flights"}},
+        )
+
+    @patch("services.llm_flight_selector_service.OpenAI")
+    def test_raises_when_no_terminal_call_ever_arrives(self, mock_openai_cls):
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+        mock_client.chat.completions.create.return_value = _response_with_tool_calls(_CONVERT_CALL)
+
+        from services.llm_flight_selector_service import select_flights
+        with self.assertRaises(ValueError):
+            select_flights(
+                round_trip_candidates=[{"price": 500}],
+                outbound_preference={}, inbound_preference={},
+            )
 
 
 class SelectFlightsTests(unittest.TestCase):
