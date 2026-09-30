@@ -5,14 +5,11 @@ Converts airline names (e.g. "Cathay Pacific") to IATA codes (e.g. "CX") using a
 import json
 import logging
 from typing import List, Optional
-from openai import OpenAI
-import os
 
 from services.langfuse_client import observe
+from services.openai_client import get_openai_client
 
 logger = logging.getLogger(__name__)
-
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 SYSTEM_PROMPT = """
 You are an aviation expert. Convert airline names to their official 2-letter IATA carrier codes.
@@ -57,6 +54,7 @@ def resolve_airline_iata_codes(airline_names: List[str]) -> List[str]:
     uncached = [name for name in needs_resolution if name not in _cache]
     if uncached:
         user_message = "Convert these airline names to IATA codes: " + ", ".join(uncached)
+        client = get_openai_client()
 
         try:
             response = client.chat.completions.create(

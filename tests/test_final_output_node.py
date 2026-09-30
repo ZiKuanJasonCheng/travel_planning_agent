@@ -55,11 +55,11 @@ class FinalOutputNodeTests(unittest.TestCase):
         result = final_output_node(_base_state())
         self.assertEqual(result["final_output"]["reminder"], "")
 
-    @patch("services.llm_reminder_service.OpenAI")
-    def test_reminder_service_is_fail_safe(self, mock_openai_cls):
+    @patch("services.llm_reminder_service.get_openai_client")
+    def test_reminder_service_is_fail_safe(self, mock_get_client):
         # The node relies on generate_reminder never raising; verify the service
         # itself degrades to "" when the LLM call blows up.
-        mock_openai_cls.return_value.chat.completions.create.side_effect = Exception("LLM down")
+        mock_get_client.return_value.chat.completions.create.side_effect = Exception("LLM down")
         from services.llm_reminder_service import generate_reminder
         self.assertEqual(generate_reminder(destination="Tokyo"), "")
 

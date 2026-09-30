@@ -1,10 +1,10 @@
 import json
-import os
 from typing import Optional, TypedDict
 
 from openai import OpenAI
 
 from services.currency import CONVERT_CURRENCY_TOOL, execute_tool_call
+from services.openai_client import get_openai_client
 
 _MAX_TOOL_ITERATIONS = 3
 
@@ -130,7 +130,7 @@ def evaluate_itinerary(
     prior_critique: Optional[str] = None,
     constraints: Optional[dict] = None,
 ) -> CheckerResult:
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    client = get_openai_client()
 
     itinerary_text = json.dumps(itinerary, ensure_ascii=False, indent=2)
     user_content = (

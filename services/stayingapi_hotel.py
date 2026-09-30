@@ -183,6 +183,7 @@ class StayingAPIHotelService:
         # A live API key can return 202 + a job to poll instead of results
         # synchronously; sandbox (stay_test_) keys always respond inline.
         data = body.get("data")
+        logger.info(f"Hotel search data: {data}", extra={"to_terminal": False})
         if isinstance(data, dict) and data.get("status") == "pending":
             body = self._poll_job(data["pollUrl"])
             data = body.get("data")

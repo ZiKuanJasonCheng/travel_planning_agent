@@ -1,12 +1,10 @@
 import json
-import os
 from typing import Optional, TypedDict
-
-from openai import OpenAI
 
 from services.city_iata_resolver import get_airport_coords
 from services.currency import CONVERT_CURRENCY_TOOL, execute_tool_call
 from services.langfuse_client import observe, update_current_generation
+from services.openai_client import get_openai_client
 from services.weather_mcp_service import get_weather_service, is_within_forecast_horizon
 
 _MODEL = "gpt-4o-mini"
@@ -156,7 +154,7 @@ def select_flights(
     outbound_preference: Optional[dict] = None,
     inbound_preference: Optional[dict] = None,
 ) -> FlightSelection:
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    client = get_openai_client()
 
     weather_cache: dict = {}
     user_content = (

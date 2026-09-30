@@ -1,3 +1,9 @@
+from dotenv import load_dotenv
+
+# Must run before any import that reads os.environ (OpenAI/Langfuse/DB config
+# are all read lazily or at import time below).
+load_dotenv()
+
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager

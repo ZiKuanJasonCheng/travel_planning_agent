@@ -8,12 +8,10 @@ the traveler: what might be imperfect, and what they can do about it. In
 """
 import json
 import logging
-import os
 from typing import Optional
 
-from openai import OpenAI
-
 from services.langfuse_client import observe, update_current_generation
+from services.openai_client import get_openai_client
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +103,7 @@ def generate_reminder(
     Never raises: any failure degrades to an empty reminder so the final
     response is never broken by the advisory step.
     """
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    client = get_openai_client()
 
     if closing:
         system_prompt = _CLOSING_PROMPT
