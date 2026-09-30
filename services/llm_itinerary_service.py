@@ -8,9 +8,10 @@ import logging
 import os
 from typing import Optional
 
-from openai import APIError, OpenAI
+from openai import APIError
 
 from services.langfuse_client import observe, update_current_generation
+from services.openai_client import get_openai_client
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +118,7 @@ def _day_rules(arrival_time: Optional[str], return_depart_time: Optional[str], d
 class LLMItineraryService:
     def __init__(self):
         api_key = os.getenv("OPENAI_API_KEY")
-        self.client = OpenAI(api_key=api_key) if api_key else None
+        self.client = get_openai_client() if api_key else None
 
     def generate_itinerary(
         self,

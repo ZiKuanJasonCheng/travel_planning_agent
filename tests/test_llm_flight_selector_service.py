@@ -71,10 +71,10 @@ class ConvertCurrencyToolLoopTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    @patch("services.llm_flight_selector_service.OpenAI")
-    def test_conversion_then_selection_resolves_to_selection(self, mock_openai_cls):
+    @patch("services.llm_flight_selector_service.get_openai_client")
+    def test_conversion_then_selection_resolves_to_selection(self, mock_get_client):
         mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.chat.completions.create.side_effect = [
             _response_with_tool_calls(_CONVERT_CALL),
             _mock_openai_response(0, None, None, "Converted price is within budget"),
@@ -89,10 +89,10 @@ class ConvertCurrencyToolLoopTests(unittest.TestCase):
         self.assertEqual(result["round_trip_index"], 0)
         self.assertEqual(mock_client.chat.completions.create.call_count, 2)
 
-    @patch("services.llm_flight_selector_service.OpenAI")
-    def test_conversion_result_is_fed_back_to_the_model(self, mock_openai_cls):
+    @patch("services.llm_flight_selector_service.get_openai_client")
+    def test_conversion_result_is_fed_back_to_the_model(self, mock_get_client):
         mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.chat.completions.create.side_effect = [
             _response_with_tool_calls(_CONVERT_CALL),
             _mock_openai_response(0, None, None, "ok"),
@@ -111,10 +111,10 @@ class ConvertCurrencyToolLoopTests(unittest.TestCase):
         # 20,000 JPY at 200 JPY/USD is 100 USD.
         self.assertEqual(payload["result"], 100.0)
 
-    @patch("services.llm_flight_selector_service.OpenAI")
-    def test_iteration_cap_forces_the_terminal_tool(self, mock_openai_cls):
+    @patch("services.llm_flight_selector_service.get_openai_client")
+    def test_iteration_cap_forces_the_terminal_tool(self, mock_get_client):
         mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
+        mock_get_client.return_value = mock_client
         # The model keeps converting and never selects on its own; the cap must
         # force the terminal tool on the final allowed iteration.
         mock_client.chat.completions.create.side_effect = [
@@ -136,10 +136,10 @@ class ConvertCurrencyToolLoopTests(unittest.TestCase):
             {"type": "function", "function": {"name": "select_flights"}},
         )
 
-    @patch("services.llm_flight_selector_service.OpenAI")
-    def test_raises_when_no_terminal_call_ever_arrives(self, mock_openai_cls):
+    @patch("services.llm_flight_selector_service.get_openai_client")
+    def test_raises_when_no_terminal_call_ever_arrives(self, mock_get_client):
         mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.chat.completions.create.return_value = _response_with_tool_calls(_CONVERT_CALL)
 
         from services.llm_flight_selector_service import select_flights
@@ -151,10 +151,10 @@ class ConvertCurrencyToolLoopTests(unittest.TestCase):
 
 
 class SelectFlightsTests(unittest.TestCase):
-    @patch("services.llm_flight_selector_service.OpenAI")
-    def test_selects_round_trip_index(self, mock_openai_cls):
+    @patch("services.llm_flight_selector_service.get_openai_client")
+    def test_selects_round_trip_index(self, mock_get_client):
         mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.chat.completions.create.return_value = _mock_openai_response(
             round_trip_index=1, outbound_index=None, inbound_index=None,
             reason="Cheapest direct option",
@@ -170,10 +170,10 @@ class SelectFlightsTests(unittest.TestCase):
         self.assertIsNone(result["outbound_index"])
         self.assertEqual(result["reason"], "Cheapest direct option")
 
-    @patch("services.llm_flight_selector_service.OpenAI")
-    def test_selects_outbound_and_inbound_indices(self, mock_openai_cls):
+    @patch("services.llm_flight_selector_service.get_openai_client")
+    def test_selects_outbound_and_inbound_indices(self, mock_get_client):
         mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.chat.completions.create.return_value = _mock_openai_response(
             round_trip_index=None, outbound_index=0, inbound_index=2,
             reason="Best fit for both legs",
@@ -192,12 +192,12 @@ class SelectFlightsTests(unittest.TestCase):
 
     @patch("services.llm_flight_selector_service.get_weather_service")
     @patch("services.llm_flight_selector_service.get_airport_coords")
-    @patch("services.llm_flight_selector_service.OpenAI")
+    @patch("services.llm_flight_selector_service.get_openai_client")
     def test_includes_weather_in_prompt_when_available(
-        self, mock_openai_cls, mock_get_coords, mock_get_weather_service
+        self, mock_get_client, mock_get_coords, mock_get_weather_service
     ):
         mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.chat.completions.create.return_value = _mock_openai_response(
             round_trip_index=0, outbound_index=None, inbound_index=None,
             reason="Good weather and price",
@@ -229,12 +229,12 @@ class SelectFlightsTests(unittest.TestCase):
 
     @patch("services.llm_flight_selector_service.get_weather_service")
     @patch("services.llm_flight_selector_service.get_airport_coords")
-    @patch("services.llm_flight_selector_service.OpenAI")
+    @patch("services.llm_flight_selector_service.get_openai_client")
     def test_selection_works_when_weather_unavailable(
-        self, mock_openai_cls, mock_get_coords, mock_get_weather_service
+        self, mock_get_client, mock_get_coords, mock_get_weather_service
     ):
         mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.chat.completions.create.return_value = _mock_openai_response(
             round_trip_index=0, outbound_index=None, inbound_index=None,
             reason="Best available option",

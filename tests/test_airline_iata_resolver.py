@@ -24,8 +24,9 @@ class ResolveAirlineIataCodesCacheTests(unittest.TestCase):
         airline_iata_resolver._cache.clear()
         self.addCleanup(airline_iata_resolver._cache.clear)
 
-    @patch("services.airline_iata_resolver.client")
-    def test_second_identical_call_makes_no_llm_call(self, mock_client):
+    @patch("services.airline_iata_resolver.get_openai_client")
+    def test_second_identical_call_makes_no_llm_call(self, mock_get_client):
+        mock_client = mock_get_client.return_value
         mock_client.chat.completions.create.return_value = _mock_response(["CX"])
 
         first = airline_iata_resolver.resolve_airline_iata_codes(["Cathay Pacific"])
@@ -35,9 +36,9 @@ class ResolveAirlineIataCodesCacheTests(unittest.TestCase):
         self.assertEqual(second, ["CX"])
         self.assertEqual(mock_client.chat.completions.create.call_count, 1)
 
-    @patch("services.airline_iata_resolver.client")
-    def test_overlapping_lists_only_send_uncached_names(self, mock_client):
-        create = mock_client.chat.completions.create
+    @patch("services.airline_iata_resolver.get_openai_client")
+    def test_overlapping_lists_only_send_uncached_names(self, mock_get_client):
+        create = mock_get_client.return_value.chat.completions.create
         create.return_value = _mock_response(["CX"])
 
         airline_iata_resolver.resolve_airline_iata_codes(["Cathay Pacific"])
@@ -51,8 +52,9 @@ class ResolveAirlineIataCodesCacheTests(unittest.TestCase):
         self.assertIn("ANA", user_message)
         self.assertNotIn("Cathay Pacific", user_message)
 
-    @patch("services.airline_iata_resolver.client")
-    def test_unresolvable_name_is_not_retried(self, mock_client):
+    @patch("services.airline_iata_resolver.get_openai_client")
+    def test_unresolvable_name_is_not_retried(self, mock_get_client):
+        mock_client = mock_get_client.return_value
         # Model omits the name it cannot resolve.
         mock_client.chat.completions.create.return_value = _mock_response([])
 
@@ -64,17 +66,17 @@ class ResolveAirlineIataCodesCacheTests(unittest.TestCase):
         self.assertEqual(second, ["Mystery Air"])
         self.assertEqual(mock_client.chat.completions.create.call_count, 1)
 
-    @patch("services.airline_iata_resolver.client")
-    def test_existing_codes_short_circuit_without_llm_call(self, mock_client):
+    @patch("services.airline_iata_resolver.get_openai_client")
+    def test_existing_codes_short_circuit_without_llm_call(self, mock_get_client):
         result = airline_iata_resolver.resolve_airline_iata_codes(["CX", "JL"])
 
         self.assertEqual(result, ["CX", "JL"])
-        mock_client.chat.completions.create.assert_not_called()
+        mock_get_client.return_value.chat.completions.create.assert_not_called()
 
-    @patch("services.airline_iata_resolver.client")
-    def test_empty_input_returns_empty(self, mock_client):
+    @patch("services.airline_iata_resolver.get_openai_client")
+    def test_empty_input_returns_empty(self, mock_get_client):
         self.assertEqual(airline_iata_resolver.resolve_airline_iata_codes([]), [])
-        mock_client.chat.completions.create.assert_not_called()
+        mock_get_client.return_value.chat.completions.create.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -19,10 +19,10 @@ class LLMCheckerServiceTests(unittest.TestCase):
         response.choices = [choice]
         return response
 
-    @patch("services.llm_checker_service.OpenAI")
-    def test_returns_passed_true_when_llm_approves(self, mock_openai_cls):
+    @patch("services.llm_checker_service.get_openai_client")
+    def test_returns_passed_true_when_llm_approves(self, mock_get_client):
         mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.chat.completions.create.return_value = self._mock_openai_response(
             passed=True, issues=[], critique=""
         )
@@ -38,10 +38,10 @@ class LLMCheckerServiceTests(unittest.TestCase):
         self.assertTrue(result["passed"])
         self.assertEqual(result["issues"], [])
 
-    @patch("services.llm_checker_service.OpenAI")
-    def test_returns_issues_when_llm_rejects(self, mock_openai_cls):
+    @patch("services.llm_checker_service.get_openai_client")
+    def test_returns_issues_when_llm_rejects(self, mock_get_client):
         mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.chat.completions.create.return_value = self._mock_openai_response(
             passed=False,
             issues=["Senso-ji appears on Day 1 and Day 3"],
@@ -60,10 +60,10 @@ class LLMCheckerServiceTests(unittest.TestCase):
         self.assertIn("Senso-ji appears on Day 1 and Day 3", result["issues"])
         self.assertNotEqual(result["critique"], "")
 
-    @patch("services.llm_checker_service.OpenAI")
-    def test_prior_critique_included_in_user_message(self, mock_openai_cls):
+    @patch("services.llm_checker_service.get_openai_client")
+    def test_prior_critique_included_in_user_message(self, mock_get_client):
         mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.chat.completions.create.return_value = self._mock_openai_response(
             passed=True, issues=[], critique=""
         )
@@ -121,10 +121,10 @@ class CheckerConvertCurrencyToolLoopTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    @patch("services.llm_checker_service.OpenAI")
-    def test_conversion_then_verdict_resolves_to_verdict(self, mock_openai_cls):
+    @patch("services.llm_checker_service.get_openai_client")
+    def test_conversion_then_verdict_resolves_to_verdict(self, mock_get_client):
         mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.chat.completions.create.side_effect = [
             _response_with_tool_calls(_CONVERT_CALL),
             _response_with_tool_calls(_tool_call(
@@ -140,10 +140,10 @@ class CheckerConvertCurrencyToolLoopTests(unittest.TestCase):
         self.assertEqual(result["issues"], ["Over budget"])
         self.assertEqual(mock_client.chat.completions.create.call_count, 2)
 
-    @patch("services.llm_checker_service.OpenAI")
-    def test_iteration_cap_forces_the_terminal_tool(self, mock_openai_cls):
+    @patch("services.llm_checker_service.get_openai_client")
+    def test_iteration_cap_forces_the_terminal_tool(self, mock_get_client):
         mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
+        mock_get_client.return_value = mock_client
         # The model keeps converting and never returns a verdict on its own.
         mock_client.chat.completions.create.side_effect = [
             _response_with_tool_calls(_CONVERT_CALL),
@@ -164,10 +164,10 @@ class CheckerConvertCurrencyToolLoopTests(unittest.TestCase):
             {"type": "function", "function": {"name": "evaluate_itinerary"}},
         )
 
-    @patch("services.llm_checker_service.OpenAI")
-    def test_raises_when_no_verdict_ever_arrives(self, mock_openai_cls):
+    @patch("services.llm_checker_service.get_openai_client")
+    def test_raises_when_no_verdict_ever_arrives(self, mock_get_client):
         mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.chat.completions.create.return_value = _response_with_tool_calls(_CONVERT_CALL)
 
         from services.llm_checker_service import evaluate_itinerary

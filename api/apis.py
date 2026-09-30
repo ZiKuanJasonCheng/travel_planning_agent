@@ -71,7 +71,7 @@ def start_trip(param: RequestModel):
 
     if param.preferences:
         try:
-            constraints = parse_feedback_with_llm(", ".join(param.preferences))
+            constraints = parse_feedback_with_llm("; ".join(param.preferences))
         except Exception as e:
             logger.error(f"start_trip(): failed to parse user constraints. {e}")
             return {

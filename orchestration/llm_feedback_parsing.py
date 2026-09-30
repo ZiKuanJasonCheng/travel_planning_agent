@@ -1,16 +1,14 @@
 import json
 import logging
 from typing import Optional
-from openai import OpenAI
 from states.accommodation_constraints import AccommodationConstraint
 from states.constraints import Constraints
 from states.trip_state import TripState
-import os
 
 from services.currency import get_rates
 from services.langfuse_client import observe, update_current_generation
+from services.openai_client import get_openai_client
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 logger = logging.getLogger(__name__)
 
 _MODEL = "gpt-4o-mini"
@@ -51,7 +49,7 @@ def parse_feedback_with_llm(feedback: str) -> Optional[Constraints]:
     ]
 
     try:
-        response = client.chat.completions.create(
+        response = get_openai_client().chat.completions.create(
             model=_MODEL,
             messages=messages,
             tools=[_EXTRACT_TOOL],
