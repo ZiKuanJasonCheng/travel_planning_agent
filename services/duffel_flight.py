@@ -100,6 +100,14 @@ def _cache_key(**kwargs) -> str:
     return json.dumps(kwargs, sort_keys=True, default=str)
 
 
+def _total_legs(candidate: Dict[str, Any]) -> int:
+    """Total flight legs across both directions — the stop count the traveler
+    actually experiences. Used to break price ties toward fewer stops."""
+    outbound = len(candidate.get("outbound_legs") or [])
+    inbound = len(candidate.get("inbound_legs") or [])
+    return outbound + inbound
+
+
 def _parse_segment(segment: Dict[str, Any]) -> Dict[str, Any]:
     """Parse a single Duffel slice segment into a flat leg dict (no price yet)."""
     origin = segment.get("origin", {}) or {}
@@ -123,6 +131,7 @@ class DuffelFlightService:
     """
 
     _CACHE_TTL_SECONDS = 900  # 15 minutes
+    _MAX_RESULTS = 500  # cap on candidates kept for the selector LLM's context window
 
     def __init__(self):
         api_key = os.getenv("DUFFEL_API_KEY")
@@ -208,8 +217,15 @@ class DuffelFlightService:
                 if candidate:
                     flights.append(candidate)
 
-            flights.sort(key=lambda x: x.get("price", float("inf")))
-            result = flights
+            # Cheapest first, then fewest stops. Duffel commonly returns
+            # thousands of offers for one route; sending them all to the
+            # selector LLM overflows its context window, so the tail is dropped
+            # below after ordering has put the best candidates at the front.
+            flights.sort(key=lambda x: (x.get("price", float("inf")), _total_legs(x)))
+            result = flights[:self._MAX_RESULTS]
+            logger.info(
+                f"search_flights(): {len(flights)} candidates -> keeping {len(result)}"
+            )
             self._cache[cache_key] = (time.time(), result)
             return result
 

@@ -4,6 +4,7 @@ from typing import Optional, TypedDict
 from services.city_iata_resolver import get_airport_coords
 from services.currency import CONVERT_CURRENCY_TOOL, execute_tool_call
 from services.langfuse_client import observe, update_current_generation
+from services.llm_retry import call_with_retry
 from services.openai_client import get_openai_client
 from services.weather_mcp_service import get_weather_service, is_within_forecast_horizon
 
@@ -180,7 +181,8 @@ def select_flights(
         # On the last allowed iteration, force the terminal tool so a model that
         # keeps calling convert_currency can never exhaust the loop unselected.
         last_chance = iteration == _MAX_TOOL_ITERATIONS - 1
-        response = client.chat.completions.create(
+        response = call_with_retry(
+            client.chat.completions.create,
             model=_MODEL,
             messages=messages,
             tools=tools,

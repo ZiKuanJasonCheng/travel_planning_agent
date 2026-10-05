@@ -4,6 +4,7 @@ from typing import Optional, TypedDict
 from openai import OpenAI
 
 from services.currency import CONVERT_CURRENCY_TOOL, execute_tool_call
+from services.llm_retry import call_with_retry
 from services.openai_client import get_openai_client
 
 _MAX_TOOL_ITERATIONS = 3
@@ -48,7 +49,10 @@ You are a strict travel itinerary quality reviewer. Check for exactly these type
 2. Unreasonable travel — consecutive activities on the same day requiring excessive \
 travel given the character of the destination. Use your knowledge of the destination \
 to judge what is reasonable (2-hour drives are normal in Iceland, not in central Kyoto).
-3. Constraint violations — if traveler constraints are provided, verify:
+3. Incomplete or overlong coverage — the itinerary must cover exactly the stated number \
+of days. Flag it if the number of day entries does not match, or if any day has no \
+activities. A day entry with an empty activities list is a gap in the plan, not a rest day.
+4. Constraint violations — if traveler constraints are provided, verify:
    - Exclusions: no excluded venues, styles, or activity types appear.
    - Must-visit places: every listed must-visit place appears at least once.
    - Budget: no activity's estimated_cost significantly exceeds the max price per ticket. \
@@ -72,7 +76,8 @@ def _evaluate_with_tools(client: OpenAI, messages: list) -> dict:
 
     for iteration in range(_MAX_TOOL_ITERATIONS):
         last_chance = iteration == _MAX_TOOL_ITERATIONS - 1
-        response = client.chat.completions.create(
+        response = call_with_retry(
+            client.chat.completions.create,
             model="gpt-4o",
             messages=messages,
             tools=tools,
