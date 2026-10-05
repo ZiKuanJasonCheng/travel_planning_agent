@@ -7,6 +7,7 @@ import logging
 from typing import List, Optional
 
 from services.langfuse_client import observe
+from services.llm_retry import call_with_retry
 from services.openai_client import get_openai_client
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,8 @@ def resolve_airline_iata_codes(airline_names: List[str]) -> List[str]:
         client = get_openai_client()
 
         try:
-            response = client.chat.completions.create(
+            response = call_with_retry(
+                client.chat.completions.create,
                 model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
@@ -75,8 +77,8 @@ def resolve_airline_iata_codes(airline_names: List[str]) -> List[str]:
             )
         except Exception as e:
             logger.error(f"resolve_airline_iata_codes: LLM service error: {e}")
-            # TODO: Retry 3 times with exponential backoff
-            raise
+            # Fall back to the original names so filtering degrades gracefully
+            return already_codes + [name if _cache.get(name) is None else _cache[name] for name in needs_resolution]
 
         try:
             tool_call = response.choices[0].message.tool_calls[0]

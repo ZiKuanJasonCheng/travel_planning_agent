@@ -3,8 +3,9 @@ from fastapi import Query, FastAPI, APIRouter, Response, status, HTTPException
 from session import create_session, get_session, update_session
 from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List
-from datetime import date, timedelta
+from datetime import timedelta
 from states.trip_state import TripState, default_transport_options
+from states.trip_dates import parse_iso_date
 from agents.final_output import final_output_node
 from orchestration.human_feedback import apply_user_feedback
 from orchestration.graph_runner import run_until_needing_feedback_or_finished
@@ -33,8 +34,8 @@ class RequestModel(BaseModel):
 
     @model_validator(mode="after")
     def resolve_and_validate_dates(self) -> "RequestModel":
-        start = self._parse_iso_date(self.start_date, "start_date")
-        end = self._parse_iso_date(self.end_date, "end_date")
+        start = parse_iso_date(self.start_date, "start_date")
+        end = parse_iso_date(self.end_date, "end_date")
 
         if end is not None:
             if end <= start:
@@ -48,18 +49,26 @@ class RequestModel(BaseModel):
 
         return self
 
-    @staticmethod
-    def _parse_iso_date(value: Optional[str], field: str) -> Optional[date]:
-        if value is None:
-            return None
-        try:
-            return date.fromisoformat(value)
-        except ValueError:
-            raise ValueError(f"{field} must be a valid ISO date (YYYY-MM-DD)")
 
 class FeedbackModel(BaseModel):
     session_id: str = Field(min_length=1, max_length=100)
     feedback: str = Field(min_length=1, max_length=2000)
+
+    # Optional trip revisions. Unlike RequestModel these are never derived
+    # here: resolving days against a start_date needs the session's existing
+    # start_date as the anchor, which only the handler has.
+    num_people: Optional[int] = Field(default=None, ge=1, le=50)
+    days: Optional[int] = Field(default=None, ge=1, le=365)
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_dates(self) -> "FeedbackModel":
+        start = parse_iso_date(self.start_date, "start_date")
+        end = parse_iso_date(self.end_date, "end_date")
+        if start is not None and end is not None and end <= start:
+            raise ValueError("end_date must be at least one day after start_date")
+        return self
 
 
 @router.post("/trip/start")
@@ -131,7 +140,22 @@ def submit_feedback(param: FeedbackModel):
 
     changed = False
     try:
-        changed = apply_user_feedback(state, param.feedback)
+        changed = apply_user_feedback(state, param.feedback, {
+            "start_date": param.start_date,
+            "end_date": param.end_date,
+            "days": param.days,
+            "num_people": param.num_people,
+        })
+    except ValueError as e:
+        # The resulting dates were internally inconsistent (end_date not after
+        # start_date). Nothing was persisted — the session still holds its
+        # previous state — so the client can simply resubmit a valid range.
+        logger.error(f"submit_feedback(): invalid date revision: {e}")
+        return {
+            "session_id": param.session_id,
+            "status": state["status"],
+            "message": f"Invalid date revision: {e}",
+        }
     except Exception as e:
         logger.error(f"submit_feedback(): failed to parse user feedback to know if a constraint has been changed. Error message: {e}")
         return {

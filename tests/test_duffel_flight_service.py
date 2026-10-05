@@ -308,6 +308,72 @@ class SearchFlightsTests(unittest.TestCase):
         self.assertEqual(result, [])
 
     @patch("urllib.request.urlopen")
+    def test_results_are_sorted_by_price_then_by_leg_count(self, mock_urlopen):
+        service = self._service()
+
+        def offer(price, outbound_segments, inbound_segments=1):
+            slices = [{"segments": [
+                {"origin": {"iata_code": "HKG"}, "destination": {"iata_code": "KIX"},
+                 "departing_at": "2026-09-10T17:30:00", "arriving_at": "2026-09-10T22:00:00",
+                 "operating_carrier": {"iata_code": "CX"}}
+                for _ in range(outbound_segments)
+            ]}]
+            if inbound_segments:
+                slices.append({"segments": [
+                    {"origin": {"iata_code": "KIX"}, "destination": {"iata_code": "HKG"},
+                     "departing_at": "2026-09-16T21:45:00", "arriving_at": "2026-09-17T01:00:00",
+                     "operating_carrier": {"iata_code": "CX"}}
+                    for _ in range(inbound_segments)
+                ]})
+            return {"total_amount": f"{price}.00", "total_currency": "USD", "slices": slices}
+
+        # Arrives deliberately unsorted; two share price 500 with different stops.
+        offers = [
+            offer(900, outbound_segments=1),  # 2 legs total
+            offer(500, outbound_segments=3),  # 4 legs total
+            offer(500, outbound_segments=1),  # 2 legs total
+            offer(100, outbound_segments=2),  # 3 legs total
+        ]
+        mock_urlopen.return_value = self._mock_http_response({"data": {"offers": offers}})
+
+        result = service.search_flights(
+            origin="HKG", destination="KIX",
+            departure_date="2026-09-10", return_date="2026-09-16",
+        )
+
+        self.assertEqual(
+            [(c["price"], len(c["outbound_legs"]) + len(c["inbound_legs"])) for c in result],
+            [(100, 3), (500, 2), (500, 4), (900, 2)],
+        )
+
+    @patch("urllib.request.urlopen")
+    def test_results_are_capped_before_caching(self, mock_urlopen):
+        service = self._service()
+        service._MAX_RESULTS = 5
+
+        def offer(price):
+            return {
+                "total_amount": f"{price}.00", "total_currency": "USD",
+                "slices": [{"segments": [
+                    {"origin": {"iata_code": "HKG"}, "destination": {"iata_code": "KIX"},
+                     "departing_at": "2026-09-10T17:30:00", "arriving_at": "2026-09-10T22:00:00",
+                     "operating_carrier": {"iata_code": "CX"}},
+                ]}],
+            }
+
+        # Prices ascending so the survivors are predictable.
+        mock_urlopen.return_value = self._mock_http_response(
+            {"data": {"offers": [offer(p) for p in range(1, 51)]}}
+        )
+
+        result = service.search_flights(origin="HKG", destination="KIX", departure_date="2026-09-10")
+
+        self.assertEqual([c["price"] for c in result], [1, 2, 3, 4, 5])
+        # The cache holds the capped list, so a cache hit can't smuggle the full set back.
+        cached = next(iter(service._cache.values()))[1]
+        self.assertEqual(len(cached), 5)
+
+    @patch("urllib.request.urlopen")
     def test_cache_hit_returns_cached_result_without_calling_api_again(self, mock_urlopen):
         service = self._service()
         mock_urlopen.return_value = self._mock_http_response({"data": {"offers": [self._round_trip_offer()]}})

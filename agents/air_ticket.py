@@ -38,6 +38,33 @@ _PARTIAL_ERROR_WARNING = (
     "feedback saying 'Run transport/flight service again'."
 )
 
+# A single origin×destination combo is already capped at DuffelFlightService._MAX_RESULTS
+# (500). When several combos are searched their totals add up, so the combined set is
+# capped again here to keep the selector prompt inside the model's context window.
+_MAX_MULTI_COMBO_RESULTS = 800
+_COMBO_SHRINK_FACTOR = 0.9
+
+
+def _allocate_combo_counts(counts: list[int], max_total: int) -> list[int]:
+    """Trim per-combo result counts so they sum to at most max_total.
+
+    Each combo keeps its cheapest results, and every combo is scaled by the same
+    ratio so no airport pair is favoured over another. Integer truncation means
+    the proportional pass already lands at or under max_total; the 0.9 shrink is
+    a safety net for any future rounding change.
+    """
+    total = sum(counts)
+    if total <= max_total:
+        return list(counts)
+
+    ratio = max_total / total
+    limits = [int(count * ratio) for count in counts]
+
+    while sum(limits) > max_total:
+        limits = [int(limit * _COMBO_SHRINK_FACTOR) for limit in limits]
+
+    return limits
+
 
 def _resolve_preference(pref_dict: Optional[dict]) -> dict:
     """Resolve a FlightPreferenceConstraint dict into a search-ready preference dict."""
@@ -199,24 +226,6 @@ def _resolve_round_trip(candidates: list):
     return outbound_legs, inbound_legs
 
 
-def _calculate_departure_date(state: TripState) -> str:
-    """Returns start_date from state if provided, otherwise defaults to 30 days from now."""
-    if state.get("start_date"):
-        return state["start_date"]
-    departure = datetime.now() + timedelta(days=30)
-    return departure.strftime("%Y-%m-%d")
-
-
-def _calculate_return_date(state: TripState, days: int) -> Optional[str]:
-    """Calculate return date based on trip duration."""
-    if days <= 1:
-        return None
-    departure_date = _calculate_departure_date(state)
-    departure = datetime.strptime(departure_date, "%Y-%m-%d")
-    return_date = departure + timedelta(days=days)
-    return return_date.strftime("%Y-%m-%d")
-
-
 def _search_all_combos(
     flight_service: DuffelFlightService,
     origin_codes: list,
@@ -227,14 +236,34 @@ def _search_all_combos(
     outbound_preference: dict,
     inbound_preference: Optional[dict],
 ) -> list:
-    """Search every origin×destination code combination and return combined results."""
-    results = []
+    """Search every origin×destination code combination and return combined results.
+
+    Results are kept per combo so the combined set can be scaled down as a whole
+    before flattening — a per-combo cap alone can't bound the total, since the
+    totals of several combos add up.
+    """
+    combo_results = []
     for oc in origin_codes:
         for dc in dest_codes:
-            results.extend(flight_service.search_flights(
+            combo_results.append(flight_service.search_flights(
                 origin=oc, destination=dc, departure_date=departure_date, return_date=return_date,
                 adults=adults, outbound_preference=outbound_preference, inbound_preference=inbound_preference,
             ))
+
+    if len(combo_results) <= 1:
+        return combo_results[0] if combo_results else []
+
+    counts = [len(results) for results in combo_results]
+    limits = _allocate_combo_counts(counts, _MAX_MULTI_COMBO_RESULTS)
+    if limits != counts:
+        logger.info(
+            f"_search_all_combos(): {sum(counts)} results across {len(counts)} combos "
+            f"-> keeping {sum(limits)} ({limits})"
+        )
+
+    results = []
+    for combo, limit in zip(combo_results, limits):
+        results.extend(combo[:limit])
     return results
 
 
@@ -266,7 +295,6 @@ def air_ticket_agent(state: TripState) -> TripState:
     Uses Duffel API to find real flight options, split by outbound/inbound direction.
     """
     destination = state.get("destination", "")
-    days = state.get("days", 1)
     existing_transport = state.get("constraints", {}).get("transport") or {}
     new_transport = state.get("new_constraints", {}).get("transport") or {}
     merged_transport = merge_constraints(existing_transport, new_transport)
@@ -284,8 +312,8 @@ def air_ticket_agent(state: TripState) -> TripState:
 
     origin = state.get("origin")
     num_people = state.get("num_people") or 1
-    departure_date = _calculate_departure_date(state)
-    return_date = _calculate_return_date(state, days) if days > 1 else None
+    departure_date = state.get("start_date")  # It shoud be a valid date value
+    return_date = state.get("end_date")  # It shoud be a valid date value
 
     origin_codes = resolve_city_iata_codes(origin)
     dest_codes = resolve_city_iata_codes(destination)

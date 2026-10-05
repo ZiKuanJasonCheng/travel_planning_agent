@@ -11,6 +11,7 @@ from typing import Optional
 from openai import APIError
 
 from services.langfuse_client import observe, update_current_generation
+from services.llm_retry import call_with_retry
 from services.openai_client import get_openai_client
 
 logger = logging.getLogger(__name__)
@@ -222,6 +223,8 @@ Current itinerary:
 
 Revise the itinerary to better match the updated preferences. You may keep, replace, or reorder entries within each day. Introduce new specific places or restaurants where needed.
 
+The trip is exactly {days} day(s) long. Return exactly {days} day entries numbered 1 through {days}. If the current itinerary has a different number of days, add or remove days so the total matches — this matters more than preserving the existing day-by-day structure.
+
 Rules:
 {_SHARED_RULES}
 {flight_rules}
@@ -238,7 +241,8 @@ Respond ONLY with valid JSON matching this structure:
     def _call_llm(self, prompt: str, context: str) -> list[dict]:
         try:
             messages = [{"role": "user", "content": prompt}]
-            response = self.client.chat.completions.create(
+            response = call_with_retry(
+                self.client.chat.completions.create,
                 model=_MODEL,
                 messages=messages,
                 temperature=0.7,

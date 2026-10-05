@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 STAYINGAPI_BASE_URL = "https://api.stayingapi.com/v1"
 _JOB_POLL_INTERVAL_SECONDS = 1
-_JOB_POLL_TIMEOUT_SECONDS = 10
+_JOB_POLL_TIMEOUT_SECONDS = 70
 
 
 def _default_check_in_date() -> str:
@@ -196,10 +196,14 @@ class StayingAPIHotelService:
 
     def _poll_job(self, poll_url: str) -> Dict[str, Any]:
         deadline = time.time() + _JOB_POLL_TIMEOUT_SECONDS
+        #logger.info(f"deadline: {deadline}", extra={"to_terminal": False})
         url = f"https://api.stayingapi.com{poll_url}" if poll_url.startswith("/") else poll_url
+        #logger.info(f"url: {url}", extra={"to_terminal": False})
         while time.time() < deadline:
             body = self._get_json(url)
+            #logger.info(f"body: {body}", extra={"to_terminal": False})
             status = (body.get("data") or {}).get("status")
+            #logger.info(f"status: {status}", extra={"to_terminal": False})
             if status == "completed":
                 return {"data": (body.get("data") or {}).get("result")}
             if status == "failed":

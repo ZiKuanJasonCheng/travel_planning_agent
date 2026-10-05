@@ -7,6 +7,7 @@ from states.trip_state import TripState
 
 from services.currency import get_rates
 from services.langfuse_client import observe, update_current_generation
+from services.llm_retry import call_with_retry
 from services.openai_client import get_openai_client
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,8 @@ def parse_feedback_with_llm(feedback: str) -> Optional[Constraints]:
     ]
 
     try:
-        response = get_openai_client().chat.completions.create(
+        response = call_with_retry(
+            get_openai_client().chat.completions.create,
             model=_MODEL,
             messages=messages,
             tools=[_EXTRACT_TOOL],
@@ -59,7 +61,6 @@ def parse_feedback_with_llm(feedback: str) -> Optional[Constraints]:
         )
     except Exception as e:
         logger.error(f"parse_feedback_with_llm: error parsing feedback by LLM because of LLM service error: {e}")
-        # TODO: Retry 3 times with exponential backoff
         raise
 
     message = response.choices[0].message

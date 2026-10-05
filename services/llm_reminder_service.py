@@ -11,6 +11,7 @@ import logging
 from typing import Optional
 
 from services.langfuse_client import observe, update_current_generation
+from services.llm_retry import call_with_retry
 from services.openai_client import get_openai_client
 
 logger = logging.getLogger(__name__)
@@ -127,7 +128,8 @@ def generate_reminder(
     ]
 
     try:
-        response = client.chat.completions.create(
+        response = call_with_retry(
+            client.chat.completions.create,
             model=_MODEL,
             messages=messages,
             tools=[_LEAVE_REMINDER_TOOL],

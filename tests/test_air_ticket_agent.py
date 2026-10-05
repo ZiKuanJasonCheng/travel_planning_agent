@@ -308,6 +308,77 @@ class ResolveRoundTripTests(unittest.TestCase):
         self.assertEqual(inbound_legs[0]["reason"], "Good value")
 
 
+class AllocateComboCountsTests(unittest.TestCase):
+    def _alloc(self, counts, max_total=800):
+        from agents.air_ticket import _allocate_combo_counts
+        return _allocate_combo_counts(counts, max_total)
+
+    def test_single_combo_is_left_at_its_own_cap(self):
+        self.assertEqual(self._alloc([500]), [500])
+
+    def test_total_within_budget_is_untouched(self):
+        self.assertEqual(self._alloc([500, 200]), [500, 200])
+
+    def test_scales_every_combo_by_the_same_ratio(self):
+        # 1500 -> r = 800/1500
+        limits = self._alloc([500, 500, 500])
+
+        self.assertEqual(limits, [266, 266, 266])
+        self.assertLessEqual(sum(limits), 800)
+
+    def test_small_combo_can_drop_to_zero(self):
+        limits = self._alloc([1, 500, 500, 500])
+
+        self.assertEqual(limits[0], 0)
+        self.assertLessEqual(sum(limits), 800)
+
+    def test_never_exceeds_the_budget(self):
+        for counts in ([500, 500, 500], [1, 500, 500, 500], [500] * 8, [499, 500, 500]):
+            with self.subTest(counts=counts):
+                self.assertLessEqual(sum(self._alloc(counts)), 800)
+
+
+class SearchAllCombosCapTests(unittest.TestCase):
+    def _candidate(self, i):
+        return {"price": i, "currency": "USD", "reason": "Duffel API result"}
+
+    def _run(self, combo_codes, results_per_combo):
+        from agents.air_ticket import _search_all_combos
+
+        svc = MagicMock()
+        svc.search_flights.side_effect = [
+            [self._candidate(j) for j in range(n)] for n in results_per_combo
+        ]
+        return _search_all_combos(
+            svc, combo_codes[0], combo_codes[1], "2026-09-10", "2026-09-16",
+            1, {}, None,
+        )
+
+    def test_single_combo_returns_results_unchanged(self):
+        result = self._run((["HKG"], ["NRT"]), [500])
+
+        self.assertEqual(len(result), 500)
+
+    def test_multiple_combos_under_budget_are_untouched(self):
+        result = self._run((["HKG", "SZX"], ["NRT"]), [500, 200])
+
+        self.assertEqual(len(result), 700)
+
+    def test_multiple_combos_over_budget_are_scaled_to_the_cap(self):
+        # 3 combos x 500 = 1500
+        result = self._run((["HKG", "SZX", "MFM"], ["NRT"]), [500, 500, 500])
+
+        self.assertLessEqual(len(result), 800)
+        self.assertEqual(len(result), 798)  # 266 each
+
+    def test_no_combos_returns_empty(self):
+        from agents.air_ticket import _search_all_combos
+
+        result = _search_all_combos(MagicMock(), [], [], "2026-09-10", "2026-09-16", 1, {}, None)
+
+        self.assertEqual(result, [])
+
+
 class AirTicketAgentIntegrationTests(unittest.TestCase):
     def setUp(self):
         patcher = patch(
