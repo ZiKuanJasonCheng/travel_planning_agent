@@ -69,6 +69,7 @@ def attraction_agent(state: TripState) -> TripState:
     num_people = state.get("num_people") or 1
     days = state.get("days") or 1
     start_date = state.get("start_date")
+    end_date = state.get("end_date")
     checker_critique = state.get("checker_critique")
     transport_options = state.get("transport_options") or {}
     flight = transport_options.get("flight") or {}
@@ -124,6 +125,8 @@ def attraction_agent(state: TripState) -> TripState:
                 critique=checker_critique,
                 hotel_lat=hotel_lat,
                 hotel_lon=hotel_lon,
+                start_date=start_date,
+                end_date=end_date,
             )
         else:
             itinerary = llm_service.generate_itinerary(
@@ -132,6 +135,7 @@ def attraction_agent(state: TripState) -> TripState:
                 hotel_area=hotel_area,
                 arrival_time=arrival_time,
                 start_date=start_date,
+                end_date=end_date,
                 styles=styles,
                 exclusions=exclusions,
                 must_go_places=must_go_places,

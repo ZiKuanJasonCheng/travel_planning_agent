@@ -13,10 +13,13 @@ from openai import APIError
 from services.langfuse_client import observe, update_current_generation
 from services.llm_retry import call_with_retry
 from services.openai_client import get_openai_client
+from services.ticketmaster_events import SEARCH_LOCAL_EVENTS_TOOL, execute_tool_call
 
 logger = logging.getLogger(__name__)
 
 _MODEL = "gpt-4o-mini"
+
+_MAX_TOOL_ITERATIONS = 3
 
 
 _ACTIVITY_SCHEMA = """{
@@ -51,6 +54,18 @@ _SHARED_RULES = """\
 """
 
 
+def _available_tools() -> Optional[list[dict]]:
+    """The tool list to offer the model, or None when event search isn't configured.
+
+    With no TICKETMASTER_API_KEY the request carries no tools at all, which is
+    the pre-tool behavior — dev environments and the existing tests are
+    unaffected.
+    """
+    if not os.getenv("TICKETMASTER_API_KEY"):
+        return None
+    return [SEARCH_LOCAL_EVENTS_TOOL]
+
+
 def _build_context_lines(
     destination: str,
     days: int,
@@ -66,6 +81,7 @@ def _build_context_lines(
     return_depart_time: Optional[str] = None,
     hotel_lat: Optional[float] = None,
     hotel_lon: Optional[float] = None,
+    end_date: Optional[str] = None,
 ) -> str:
     parts = [f"Destination: {destination}", f"Trip duration: {days} day(s)", f"Number of travelers: {num_people}"]
     if origin:
@@ -74,7 +90,11 @@ def _build_context_lines(
         parts.append(f"Hotel location: {hotel_area}")
     if hotel_lat is not None and hotel_lon is not None:
         parts.append(f"Hotel coordinates: ({hotel_lat:.5f}, {hotel_lon:.5f})")
-    if start_date:
+    # The end date matters for event search: the planner must query the whole
+    # visit window, not just its first day.
+    if start_date and end_date:
+        parts.append(f"Trip dates: {start_date} to {end_date}")
+    elif start_date:
         parts.append(f"Start date: {start_date}")
     if arrival_time:
         parts.append(f"Arrival time on day 1: {arrival_time}")
@@ -138,6 +158,7 @@ class LLMItineraryService:
         critique: Optional[str] = None,
         hotel_lat: Optional[float] = None,
         hotel_lon: Optional[float] = None,
+        end_date: Optional[str] = None,
     ) -> list[dict]:
         if not self.client:
             return []
@@ -147,6 +168,7 @@ class LLMItineraryService:
             styles, exclusions, must_go_places, max_price_per_ticket,
             num_people=num_people, origin=origin, return_depart_time=return_depart_time,
             hotel_lat=hotel_lat, hotel_lon=hotel_lon,
+            end_date=end_date,
         )
         flight_rules = _day_rules(arrival_time, return_depart_time, days)
 
@@ -155,6 +177,8 @@ class LLMItineraryService:
 {context}
 
 Plan each day at a granular level — specific places to visit, where to have lunch, afternoon spots, and dinner restaurants. Mix sightseeing, local food, and experiences that match the travel styles.
+
+If a tool is available for finding local events, you may use it to include something happening during the trip dates.
 
 Rules:
 {_SHARED_RULES}
@@ -166,7 +190,7 @@ Respond ONLY with valid JSON matching this structure:
         if critique:
             prompt += f"\n\nIMPORTANT — a quality review found these issues in a previous version. You MUST fix them:\n{critique}"
 
-        return self._call_llm(prompt, context="generate_itinerary")
+        return self._call_llm(prompt, context="generate_itinerary", tools=_available_tools())
 
     def update_itinerary(
         self,
@@ -185,6 +209,8 @@ Respond ONLY with valid JSON matching this structure:
         critique: Optional[str] = None,
         hotel_lat: Optional[float] = None,
         hotel_lon: Optional[float] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
     ) -> list[dict]:
         if not self.client:
             return []
@@ -206,10 +232,11 @@ Respond ONLY with valid JSON matching this structure:
         ]
 
         context = _build_context_lines(
-            destination, days, hotel_area, arrival_time, None,
+            destination, days, hotel_area, arrival_time, start_date,
             styles, exclusions, must_go_places, max_price_per_ticket,
             num_people=num_people, origin=origin, return_depart_time=return_depart_time,
             hotel_lat=hotel_lat, hotel_lon=hotel_lon,
+            end_date=end_date,
         )
         flight_rules = _day_rules(arrival_time, return_depart_time, days)
 
@@ -225,6 +252,8 @@ Revise the itinerary to better match the updated preferences. You may keep, repl
 
 The trip is exactly {days} day(s) long. Return exactly {days} day entries numbered 1 through {days}. If the current itinerary has a different number of days, add or remove days so the total matches — this matters more than preserving the existing day-by-day structure.
 
+If a tool is available for finding local events, you may use it to include something happening during the trip dates.
+
 Rules:
 {_SHARED_RULES}
 {flight_rules}
@@ -235,35 +264,87 @@ Respond ONLY with valid JSON matching this structure:
         if critique:
             prompt += f"\n\nIMPORTANT — a quality review found these issues in a previous version. You MUST fix them:\n{critique}"
 
-        return self._call_llm(prompt, context="update_itinerary")
+        return self._call_llm(prompt, context="update_itinerary", tools=_available_tools())
 
     @observe(as_type="generation", capture_input=False, capture_output=False)
-    def _call_llm(self, prompt: str, context: str) -> list[dict]:
+    def _call_llm(self, prompt: str, context: str, tools: Optional[list[dict]] = None) -> list[dict]:
+        """Run the planning prompt, letting the model call tools before it answers.
+
+        Up to `_MAX_TOOL_ROUNDS` tool rounds run; once a response arrives with
+        no tool_calls, its content is the itinerary JSON and is parsed. If the
+        cap is reached the model is asked once more with tools withheld, so a
+        usable itinerary always comes back.
+        """
         try:
             messages = [{"role": "user", "content": prompt}]
-            response = call_with_retry(
-                self.client.chat.completions.create,
-                model=_MODEL,
-                messages=messages,
-                temperature=0.7,
-                response_format={"type": "json_object"},
-                timeout=180,
-            )
-            message = response.choices[0].message
+            request = {
+                "model": _MODEL,
+                "temperature": 0.7,
+                "response_format": {"type": "json_object"},
+                "timeout": 180,
+            }
+            if tools:
+                request["tools"] = tools
+
+            total_prompt_tokens = 0
+            total_completion_tokens = 0
+            last_model = _MODEL
+            final_message = None
+
+            for iteration in range(_MAX_TOOL_ITERATIONS):
+                # On the last iteration, withhold tools so the model must answer
+                # with the itinerary itself rather than another lookup.
+                last_chance = iteration == _MAX_TOOL_ITERATIONS - 1
+                call_kwargs = dict(request)
+                if last_chance and tools:
+                    call_kwargs.pop("tools", None)
+
+                response = call_with_retry(
+                    self.client.chat.completions.create, messages=messages, **call_kwargs
+                )
+                message = response.choices[0].message
+                last_model = response.model
+                total_prompt_tokens += response.usage.prompt_tokens
+                total_completion_tokens += response.usage.completion_tokens
+                final_message = message
+
+                tool_calls = message.tool_calls or []
+                if not tool_calls:
+                    # The answer turn holds the itinerary JSON. A tool-calling
+                    # turn never reaches here — it carries tool_calls with
+                    # content=None, which json.loads would reject.
+                    break
+
+                messages.append({
+                    "role": "assistant",
+                    "content": message.content,
+                    "tool_calls": [tc.model_dump() for tc in tool_calls],
+                })
+                for tc in tool_calls:
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": execute_tool_call(tc.function.name, tc.function.arguments),
+                    })
+
             update_current_generation(
-                model=response.model,
-                input=messages,
-                output={"role": message.role, "content": message.content},
+                model=last_model,
+                input={"tools": tools, "messages": messages},
+                output={
+                    "role": final_message.role,
+                    "content": final_message.content,
+                    "tool_calls": [tc.model_dump() for tc in (final_message.tool_calls or [])],
+                },
                 usage_details={
-                    "input": response.usage.prompt_tokens,
-                    "output": response.usage.completion_tokens,
+                    "input": total_prompt_tokens,
+                    "output": total_completion_tokens,
                 },
                 model_parameters={
                     "temperature": 0.7,
                     "response_format": "json_object",
                 },
             )
-            parsed = json.loads(message.content)
+            parsed = json.loads(final_message.content)
             return self._normalize(parsed.get("itinerary", []))
         except APIError as e:
             logger.error(f"LLMItineraryService.{context}() OpenAI API error: {e}")
