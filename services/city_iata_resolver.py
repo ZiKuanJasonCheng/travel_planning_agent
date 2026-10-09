@@ -19,9 +19,14 @@ _OURAIRPORTS_URL = "https://ourairports.com/data/airports.csv"
 # - Major airport lacks "International" in name (London Heathrow, Haneda, etc.)
 # - Same city name exists in an obscure country that sorts first
 # - Common shorthand / island names that differ from the DB city field
+# Each entry is checked before the OurAirports search, because that search matches
+# on substrings and will happily return a small airport in a same-named town
+# elsewhere ("London" → London, Ontario) rather than the city the traveler means.
 _STATIC_MAP: dict[str, str] = {
     "london": "LHR",      # Heathrow lacks "International" in its name
     "bali": "DPS",        # municipality is "Denpasar", not "Bali"
+    "sydney": "SYD",      # substring match lands on Sydney, Nova Scotia
+    "tokyo": "NRT",       # Haneda's DB name lacks "International"
     "tyo": "NRT",
     "nyc": "JFK",
     "kyoto": "KIX",
@@ -30,6 +35,7 @@ _STATIC_MAP: dict[str, str] = {
 
 # Cities served by more than one significant international airport.
 # All codes are returned so callers can search each combination.
+# Consulted only when the static map has no entry, so an entry there wins.
 _MULTI_AIRPORT_MAP: dict[str, list[str]] = {
     "shanghai": ["PVG", "SHA"],
     "beijing": ["PEK", "PKX"],
@@ -209,19 +215,32 @@ def resolve_city_iata_codes(name: str) -> list[str]:
 
     Returns a single-element list for most cities and a multi-element list
     for cities with more than one significant international airport.
+
+    Resolution order mirrors `resolve_city_iata`: the static map and the
+    multi-airport map are consulted *before* the OurAirports search, because that
+    search matches on substrings and otherwise resolves "London" to London, Ontario
+    and "Sydney" to Sydney, Nova Scotia. Both agents call this function, so an
+    ordering slip here sends flight and hotel searches to the wrong continent.
     """
     stripped = name.strip()
 
     if len(stripped) == 3 and stripped.isupper():
         return [stripped]
 
+    key = stripped.lower()
+
+    static = _STATIC_MAP.get(key)
+    if static:
+        # A static entry names one primary airport; the multi-airport map can still
+        # widen it, so "london" yields both LHR and LGW.
+        return _MULTI_AIRPORT_MAP.get(key, [static])
+
+    if key in _MULTI_AIRPORT_MAP:
+        return _MULTI_AIRPORT_MAP[key]
+
     results = _lookup_airportsdata(stripped)
     if results:
         return results
-
-    key = stripped.lower()
-    if key in _MULTI_AIRPORT_MAP:
-        return _MULTI_AIRPORT_MAP[key]
 
     nearest = _geocode_and_find_nearest(stripped)
     if nearest:

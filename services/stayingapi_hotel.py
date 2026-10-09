@@ -11,14 +11,21 @@ from datetime import date, datetime, timedelta
 from typing import Optional, List, Dict, Any
 from urllib import error, request
 
+from services.city_iata_resolver import get_airport_coords
 from services.currency import to_usd
+from services.geocoding import fetch_coordinates
 from services.langfuse_client import observe
+from services.llm_hotel_selector_service import _haversine_km
 
 logger = logging.getLogger(__name__)
 
 STAYINGAPI_BASE_URL = "https://api.stayingapi.com/v1"
 _JOB_POLL_INTERVAL_SECONDS = 1
-_JOB_POLL_TIMEOUT_SECONDS = 70
+_JOB_POLL_TIMEOUT_SECONDS = 150
+
+# How far a hotel may sit from the centre of the traveler's preferred area and still
+# count as being in it.
+_PREFERRED_AREA_RADIUS_KM = 5.0
 
 
 def _default_check_in_date() -> str:
@@ -35,15 +42,60 @@ def _nights(check_in_date: str, check_out_date: str) -> int:
     return max(1, (date.fromisoformat(check_out_date) - date.fromisoformat(check_in_date)).days)
 
 
+def _within_preferred_area(
+    hotel_lat,
+    hotel_lon,
+    area: str,
+    preferred_area: Optional[str],
+    area_coords: Optional[tuple[float, float]],
+) -> bool:
+    """Whether a hotel can be considered inside the traveler's preferred area.
+
+    Nominatim geocodes the free-text area ("Shinjuku", "Ueno, Tokyo") into a
+    representative centre point, and a hotel is judged against that centre by
+    distance. String-matching the hotel's own `area` field — the previous approach —
+    silently dropped every airbnb and google listing, because those platforms return
+    no city or region at all.
+
+    Name matching survives as the fallback for when the area could not be
+    geocoded, which keeps a typo'd or unlisted area from emptying the result set, and
+    as a last resort beyond the radius: a large area can hold a hotel that is
+    genuinely inside it yet sits far from the geocoded centre point.
+    """
+    if not preferred_area:
+        return True
+
+    name_match = preferred_area.lower() in (area or "").lower()
+
+    if not area_coords:
+        return name_match
+
+    if hotel_lat is None or hotel_lon is None:
+        # Unknown coordinates can't be measured, so they pass: dropping them would
+        # discard every listing from a provider that omits location data.
+        return True
+
+    try:
+        distance = _haversine_km(
+            float(hotel_lat), float(hotel_lon), area_coords[0], area_coords[1]
+        )
+    except (TypeError, ValueError) as e:
+        logger.error(f"Could not measure hotel distance from preferred area: {e}", extra={"to_terminal": False})
+        return True
+
+    if distance <= _PREFERRED_AREA_RADIUS_KM:
+        return True
+
+    # Too far from the centre to count by distance alone, but the hotel may still
+    # name the area — a large area extends well past its centre point.
+    return name_match
+
+
 def _passes_hotel_filters(
     nightly_price_usd: float,
-    area: str,
     max_price_per_night: Optional[int],
-    preferred_area: Optional[str],
 ) -> bool:
     if max_price_per_night and nightly_price_usd > max_price_per_night:
-        return False
-    if preferred_area and preferred_area.lower() not in area.lower():
         return False
     return True
 
@@ -52,8 +104,17 @@ def _cache_key(**kwargs) -> str:
     return json.dumps(kwargs, sort_keys=True, default=str)
 
 
-def _parse_search_result(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Parse a single StayingAPI Property into a flat hotel dict (no filtering yet)."""
+def _parse_search_result(
+    result: Dict[str, Any],
+    airport_coords: Optional[tuple[float, float]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Parse a single StayingAPI Property into a flat hotel dict (no filtering yet).
+
+    `airport_coords` is the destination airport's (lat, lon) when known; it enables
+    `distance_to_airport_km`, which the hotel selector needs to judge whether a
+    candidate suits the traveler's landing night. None when either side is missing
+    coordinates — vrbo listings in particular often carry none.
+    """
     price = result.get("price") or {}
     nightly_price = price.get("nightlyPrice")
     if nightly_price is None:
@@ -67,6 +128,19 @@ def _parse_search_result(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     location = result.get("location") or {}
     area = location.get("city") or location.get("region") or "unknown area"
 
+    lat = location.get("lat")
+    lon = location.get("lng")
+
+    distance_to_airport_km = None
+    if airport_coords and lat is not None and lon is not None:
+        try:
+            distance_to_airport_km = round(
+                _haversine_km(float(lat), float(lon), airport_coords[0], airport_coords[1]), 1
+            )
+        except (TypeError, ValueError) as e:
+            logger.error(f"An error occurred while calculating distance between an airport and a hotel. Error message: {e}", extra={"to_terminal": False})
+            distance_to_airport_km = None
+
     return {
         "type": "hotel",
         "name": result.get("name") or "Unknown Hotel",
@@ -74,10 +148,11 @@ def _parse_search_result(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "currency": currency,
         "area": area,
         "hotel_id": result.get("id"),
-        "lat": location.get("lat"),
-        "lon": location.get("lng"),
+        "lat": lat,
+        "lon": lon,
         "supplier": "stayingapi",
         "reason": "StayingAPI offer",
+        "distance_to_airport_km": distance_to_airport_km,
     }
 
 
@@ -112,13 +187,18 @@ class StayingAPIHotelService:
         room_quantity: int = 1,
         max_price_per_night: Optional[int] = None,
         preferred_area: Optional[str] = None,
+        airport_iata: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Search for hotels using StayingAPI's Search API.
 
+        `airport_iata` is optional and only affects the returned data: when given, each
+        hotel carries `distance_to_airport_km` for the hotel selector to reason about.
+
         Returns:
             List of hotel dicts: {type, name, price_per_night, currency, area, hotel_id,
-            lat, lon, supplier, reason}, or a single-item error list on failure.
+            lat, lon, supplier, reason, distance_to_airport_km}, or a single-item error
+            list on failure.
         """
         check_in = check_in_date or _default_check_in_date()
         check_out = check_out_date or _default_check_out_date(check_in)
@@ -127,6 +207,7 @@ class StayingAPIHotelService:
             destination=destination, check_in_date=check_in, check_out_date=check_out,
             adults=adults, room_quantity=room_quantity,
             max_price_per_night=max_price_per_night, preferred_area=preferred_area,
+            airport_iata=airport_iata,
         )
         cached = self._cache.get(cache_key)
         if cached and (time.time() - cached[0]) < self._cache_ttl_seconds:
@@ -136,6 +217,17 @@ class StayingAPIHotelService:
             result = self._mock_hotel_search(destination, check_in, check_out, max_price_per_night, preferred_area)
             self._cache[cache_key] = (time.time(), result)
             return result
+
+        airport_coords = get_airport_coords(airport_iata) if airport_iata else None
+
+        # Geocode the preferred area once so hotels can be judged by distance; a
+        # lookup failure just means the area filter can't apply.
+        area_coords = fetch_coordinates(preferred_area) if preferred_area else None
+        if preferred_area and not area_coords:
+            logger.warning(
+                f"search_hotels(): could not geocode preferred_area '{preferred_area}' — "
+                f"area filtering falls back to name matching"
+            )
 
         try:
             params = {
@@ -156,11 +248,15 @@ class StayingAPIHotelService:
 
             hotels = []
             for item in raw_results:
-                hotel = _parse_search_result(item)
+                hotel = _parse_search_result(item, airport_coords)
                 if hotel is None:
                     continue
                 nightly_usd = to_usd(hotel["price_per_night"], hotel["currency"])
-                if not _passes_hotel_filters(nightly_usd, hotel["area"], max_price_per_night, preferred_area):
+                if not _passes_hotel_filters(nightly_usd, max_price_per_night):
+                    continue
+                if not _within_preferred_area(
+                    hotel["lat"], hotel["lon"], hotel["area"], preferred_area, area_coords
+                ):
                     continue
                 hotels.append(hotel)
 
@@ -245,7 +341,9 @@ class StayingAPIHotelService:
         for c in raw_candidates:
             nightly_price = int(c["nightly_price"])
             nightly_usd = to_usd(nightly_price, c["currency"])
-            if not _passes_hotel_filters(nightly_usd, c["area"], max_price_per_night, preferred_area):
+            if not _passes_hotel_filters(nightly_usd, max_price_per_night):
+                continue
+            if not _within_preferred_area(c["lat"], c["lon"], c["area"], preferred_area, None):
                 continue
             results.append({
                 "type": "hotel",
@@ -258,6 +356,7 @@ class StayingAPIHotelService:
                 "lon": c["lon"],
                 "supplier": "stayingapi",
                 "reason": "Mock hotel data (StayingAPI not configured)",
+                "distance_to_airport_km": None,
             })
 
         results.sort(key=lambda item: item.get("price_per_night", 10**9))

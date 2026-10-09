@@ -187,6 +187,37 @@ class CityIataResolverTests(unittest.TestCase):
         from services.city_iata_resolver import resolve_city_iata_codes
         self.assertEqual(resolve_city_iata_codes("NRT"), ["NRT"])
 
+    def test_resolve_codes_uses_static_map_before_airports_lookup(self):
+        # "London" substring-matches London, Ontario (YXU) in OurAirports, so the
+        # static entry has to win or both agents search the wrong continent.
+        from services.city_iata_resolver import resolve_city_iata_codes
+        self.assertIn("LHR", resolve_city_iata_codes("London"))
+        self.assertNotIn("YXU", resolve_city_iata_codes("London"))
+
+    def test_resolve_codes_static_entry_keeps_multi_airport_alternatives(self):
+        from services.city_iata_resolver import resolve_city_iata_codes
+        self.assertEqual(resolve_city_iata_codes("London"), ["LHR", "LGW"])
+
+    def test_resolve_codes_agrees_with_single_resolver(self):
+        # The two resolvers must not drift: a disagreement would send the flight
+        # search and the hotel search to different airports.
+        from services.city_iata_resolver import resolve_city_iata, resolve_city_iata_codes
+        for city in ("London", "Bali", "Tokyo", "Kyoto", "Osaka", "nyc"):
+            self.assertEqual(resolve_city_iata_codes(city)[0], resolve_city_iata(city))
+
+    def test_resolve_codes_bali_static_entry_beats_poland_lookup(self):
+        from services.city_iata_resolver import resolve_city_iata_codes
+        self.assertEqual(resolve_city_iata_codes("Bali"), ["DPS"])
+
+    def test_resolve_codes_sydney_not_nova_scotia(self):
+        from services.city_iata_resolver import resolve_city_iata_codes
+        self.assertEqual(resolve_city_iata_codes("Sydney"), ["SYD"])
+
+    def test_resolve_codes_unmapped_city_still_uses_lookup(self):
+        # The static map must not shadow cities it doesn't cover.
+        from services.city_iata_resolver import resolve_city_iata_codes
+        self.assertIn("PVG", resolve_city_iata_codes("Shanghai"))
+
     # ------------------------------------------------------------------
     # Geocoding fallback — _geocode_and_find_nearest
     # ------------------------------------------------------------------

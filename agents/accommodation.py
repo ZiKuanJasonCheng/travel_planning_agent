@@ -1,8 +1,11 @@
 import logging
+import os
 
 from states.trip_state import TripState
 from orchestration.tracability import log_trace
 from orchestration.merge_constraints import resolve_category_constraints, UNLIMITED_PRICE
+from services.city_iata_resolver import resolve_city_iata_codes
+from services.llm_hotel_selector_service import resolve_check_in_date, select_hotels
 from services.stayingapi_hotel import get_stayingapi_hotel_service
 from copy import deepcopy
 from datetime import datetime, timedelta
@@ -73,8 +76,24 @@ def accommodation_agent(state: TripState) -> TripState:
     max_price_per_night = preference.get("max_price_per_night")
     preferred_area = preference.get("area")
 
-    check_in_date = state.get("start_date") or _default_check_in_date()
+    start_date = state.get("start_date")
+    days = state.get("days") or 1
+    outbound_legs = ((state.get("transport_options") or {}).get("flight") or {}).get("outbound") or []
+    arrival_leg = outbound_legs[-1] if outbound_legs else {}
+
+    check_in_date = resolve_check_in_date(
+        departure_date=arrival_leg.get("departure_date"),
+        arrival_date=arrival_leg.get("arrival_date"),
+        arrival_time=arrival_leg.get("arrival_time"),
+        trip_start_date=start_date,
+    ) or _default_check_in_date()
     check_out_date = state.get("end_date") or _default_check_out_date(check_in_date, days)
+
+    # Names the airport so candidates can carry a distance to it; the selector uses
+    # that to judge which hotel suits a late landing.
+    dest_airport_codes = resolve_city_iata_codes(destination)
+    airport_iata = dest_airport_codes[0] if dest_airport_codes else None
+
     logger.info(f"Key inputs for accommodation_agent: max_price_per_night: {max_price_per_night}, preferred_area: {preferred_area}, check_in_date: {check_in_date}, check_out_date: {check_out_date}", extra={"to_terminal": False})
 
     num_people = state.get("num_people") or 1
@@ -87,12 +106,16 @@ def accommodation_agent(state: TripState) -> TripState:
         room_quantity=1,
         max_price_per_night=max_price_per_night,
         preferred_area=preferred_area,
+        airport_iata=airport_iata,
     )
 
     if _had_errors(hotels):
         accommodation_options = [dict(_ERROR_MESSAGE)]
     elif hotels:
-        accommodation_options = hotels[:3]
+        accommodation_options = _select_stays(
+            hotels, destination, airport_iata, arrival_leg, check_in_date, check_out_date,
+            num_people, preference,
+        )
     else:
         accommodation_options = [_build_fallback_hotel(max_price_per_night, preferred_area)]
 
@@ -112,6 +135,62 @@ def accommodation_agent(state: TripState) -> TripState:
     logger.info(f"accommodation_agent: accommodation_options: {accommodation_options}", extra={"to_terminal": False})
 
     return {**state, "accommodation_options": accommodation_options, "constraints": constraints}
+
+
+def _select_stays(
+    hotels: list,
+    destination: str,
+    airport_iata,
+    arrival_leg: dict,
+    check_in_date: str,
+    check_out_date: str,
+    num_people: int,
+    preference: dict,
+) -> list:
+    """Pick which hotels to book, falling back to the single best candidate.
+
+    The LLM decides whether the stay should be split across a land-night hotel and a
+    main hotel. When it can't be asked (one candidate only, or no LLM configured) or
+    fails, the fail-safe is the first hotel alone: `hotels` arrives price-sorted, so
+    that is the cheapest acceptable option, and returning one hotel for the whole
+    stay is always coherent, whereas a partially-applied split could leave a night
+    uncovered.
+    """
+    shortlist = hotels[:3]
+    fallback = _with_stay_dates(hotels[:1], check_in_date, check_out_date)
+
+    if len(shortlist) < 2 or not os.getenv("OPENAI_API_KEY"):
+        return fallback
+
+    try:
+        selected = select_hotels(
+            candidates=shortlist,
+            check_in_date=check_in_date,
+            check_out_date=check_out_date,
+            destination=destination,
+            airport_iata=airport_iata,
+            arrival_time=arrival_leg.get("arrival_time"),
+            arrival_date=arrival_leg.get("arrival_date"),
+            num_people=num_people,
+            preference=preference,
+        )
+    except Exception as e:
+        # Accommodation is not the traveler's primary decision — a selector failure
+        # should degrade to one bookable hotel, not fail the whole plan.
+        logger.error(f"accommodation_agent: hotel selection failed, using the first hotel: {e}")
+        return fallback
+
+    if not selected:
+        logger.warning("accommodation_agent: hotel selector returned nothing, using the first hotel")
+        return fallback
+
+    logger.info(f"accommodation_agent: selected {len(selected)} stay(s) from {len(shortlist)} candidates")
+    return selected
+
+
+def _with_stay_dates(hotels: list, check_in_date: str, check_out_date: str) -> list:
+    """Stamp the single stay window onto hotels that didn't come from the selector."""
+    return [{**hotel, "check_in_date": check_in_date, "check_out_date": check_out_date} for hotel in hotels]
 
 
 def _build_fallback_hotel(max_price_per_night, preferred_area):

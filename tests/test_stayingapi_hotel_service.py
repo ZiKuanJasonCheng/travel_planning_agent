@@ -8,6 +8,7 @@ from services.stayingapi_hotel import (
     _default_check_out_date,
     _nights,
     _passes_hotel_filters,
+    _within_preferred_area,
     _cache_key,
     _parse_search_result,
     StayingAPIHotelService,
@@ -29,19 +30,13 @@ class NightsTests(unittest.TestCase):
 
 class PassesHotelFiltersTests(unittest.TestCase):
     def test_no_filters_always_passes(self):
-        self.assertTrue(_passes_hotel_filters(200, "Shinjuku", None, None))
+        self.assertTrue(_passes_hotel_filters(200, None))
 
     def test_over_budget_fails(self):
-        self.assertFalse(_passes_hotel_filters(200, "Shinjuku", 150, None))
+        self.assertFalse(_passes_hotel_filters(200, 150))
 
     def test_within_budget_passes(self):
-        self.assertTrue(_passes_hotel_filters(120, "Shinjuku", 150, None))
-
-    def test_area_mismatch_fails(self):
-        self.assertFalse(_passes_hotel_filters(120, "Ueno", 150, "Shinjuku"))
-
-    def test_area_substring_match_passes(self):
-        self.assertTrue(_passes_hotel_filters(120, "Nishi-Shinjuku, Tokyo", 150, "Shinjuku"))
+        self.assertTrue(_passes_hotel_filters(120, 150))
 
 
 class CacheKeyTests(unittest.TestCase):
@@ -101,6 +96,187 @@ class ParseSearchResultTests(unittest.TestCase):
         result["location"] = {}
         hotel = _parse_search_result(result)
         self.assertEqual(hotel["area"], "unknown area")
+
+
+class ParseSearchResultDistanceTests(unittest.TestCase):
+    """distance_to_airport_km is what the hotel selector uses to judge a late landing."""
+
+    def _result(self, **overrides):
+        base = {
+            "id": "prop_0000123",
+            "name": "Shinjuku Grand Hotel",
+            "location": {"city": "Tokyo", "lat": 35.6938, "lng": 139.7034},
+            "price": {"nightlyPrice": 120.0, "currency": "USD"},
+        }
+        base.update(overrides)
+        return base
+
+    def test_no_airport_coords_leaves_distance_none(self):
+        hotel = _parse_search_result(self._result())
+        self.assertIsNone(hotel["distance_to_airport_km"])
+
+    def test_computes_distance_when_airport_coords_given(self):
+        # NRT sits ~60 km east of central Tokyo.
+        hotel = _parse_search_result(self._result(), airport_coords=(35.7647, 140.3864))
+        self.assertAlmostEqual(hotel["distance_to_airport_km"], 60.8, delta=2.0)
+
+    def test_distance_is_rounded_to_one_decimal(self):
+        hotel = _parse_search_result(self._result(), airport_coords=(35.7647, 140.3864))
+        self.assertEqual(hotel["distance_to_airport_km"], round(hotel["distance_to_airport_km"], 1))
+
+    def test_missing_hotel_coords_leaves_distance_none(self):
+        # vrbo listings frequently carry no coordinates.
+        result = self._result(location={"city": "Tokyo", "lat": None, "lng": None})
+        hotel = _parse_search_result(result, airport_coords=(35.7647, 140.3864))
+        self.assertIsNone(hotel["distance_to_airport_km"])
+
+    def test_nonnumeric_hotel_coords_leave_distance_none(self):
+        result = self._result(location={"city": "Tokyo", "lat": "n/a", "lng": "n/a"})
+        hotel = _parse_search_result(result, airport_coords=(35.7647, 140.3864))
+        self.assertIsNone(hotel["distance_to_airport_km"])
+
+
+class WithinPreferredAreaTests(unittest.TestCase):
+    """Area matching by distance, because most providers return no city at all."""
+
+    _SHINJUKU = (35.6937632, 139.7036319)
+
+    def _within(self, lat, lon, area="unknown area", preferred="Shinjuku", coords=None):
+        return _within_preferred_area(
+            lat, lon, area, preferred, self._SHINJUKU if coords is None else coords
+        )
+
+    def test_hotel_at_the_area_centre_is_within(self):
+        self.assertTrue(self._within(35.6937632, 139.7036319))
+
+    def test_hotel_three_km_away_is_within(self):
+        # ~0.027 degrees of latitude is ~3 km.
+        self.assertTrue(self._within(35.7208, 139.7036319))
+
+    def test_hotel_twenty_km_away_is_outside(self):
+        self.assertFalse(self._within(35.8745, 139.7036319))
+
+    def test_five_km_is_inclusive_boundary(self):
+        # 5 km north of the centre; the threshold itself must count as inside.
+        self.assertTrue(self._within(35.7387292, 139.7036319))
+
+    def test_unknown_hotel_coords_pass_rather_than_drop(self):
+        # A provider without coordinates must not have every listing discarded.
+        self.assertTrue(self._within(None, None))
+
+    def test_nonnumeric_hotel_coords_pass(self):
+        self.assertTrue(self._within("n/a", "n/a"))
+
+    def test_no_preferred_area_passes(self):
+        self.assertTrue(self._within(35.8745, 139.7036319, preferred=None))
+
+    def test_falls_back_to_name_match_when_area_ungeocoded(self):
+        self.assertTrue(
+            _within_preferred_area(35.8745, 139.7036319, "Nishi-Shinjuku, Tokyo", "Shinjuku", None)
+        )
+        self.assertFalse(
+            _within_preferred_area(35.8745, 139.7036319, "Ueno", "Shinjuku", None)
+        )
+
+    def test_far_hotel_naming_the_area_still_counts(self):
+        # A large area extends past its centre point, so a hotel beyond the radius
+        # that still names the area is kept.
+        self.assertTrue(self._within(35.8745, 139.7036319, area="Shinjuku Ward"))
+
+    def test_far_hotel_not_naming_the_area_is_dropped(self):
+        self.assertFalse(self._within(35.8745, 139.7036319, area="Ueno"))
+
+    def test_far_hotel_with_unknown_area_is_dropped(self):
+        # AirBnB and Google return no city, so they can't rescue themselves by name.
+        self.assertFalse(self._within(35.8745, 139.7036319, area="unknown area"))
+
+    def test_name_match_is_case_insensitive(self):
+        self.assertTrue(self._within(35.8745, 139.7036319, area="SHINJUKU"))
+
+    def test_nearby_hotel_passes_even_when_area_names_something_else(self):
+        # Distance is checked first: a hotel inside the radius is kept regardless.
+        self.assertTrue(self._within(35.7000, 139.7036319, area="Ueno"))
+
+
+class AreaDistanceFilteringTests(unittest.TestCase):
+    """search_hotels uses the area centre when a preferred_area is given."""
+
+    def _service(self):
+        service = StayingAPIHotelService.__new__(StayingAPIHotelService)
+        service.use_mock = False
+        service.api_key = "test-key"
+        service._cache = {}
+        service._cache_ttl_seconds = 900
+        return service
+
+    def _raw(self, name, lat, lon, price=100.0, city=None):
+        return {
+            "id": f"id_{name}",
+            "name": name,
+            "location": {"city": city, "region": None, "lat": lat, "lng": lon},
+            "price": {"nightlyPrice": price, "currency": "USD"},
+        }
+
+    @patch("services.stayingapi_hotel.fetch_coordinates")
+    def test_keeps_only_hotels_within_the_radius(self, mock_geocode):
+        mock_geocode.return_value = (35.6937632, 139.7036319)  # Shinjuku
+        service = self._service()
+        near = self._raw("Near Shinjuku", 35.7000, 139.7036)      # ~0.7 km
+        far = self._raw("Far Away", 35.8745, 139.7036)            # ~20 km
+        service._request_search = MagicMock(return_value=[near, far])
+
+        hotels = service.search_hotels(
+            destination="Tokyo", check_in_date="2026-11-17", check_out_date="2026-11-21",
+            preferred_area="Shinjuku",
+        )
+
+        self.assertEqual([h["name"] for h in hotels], ["Near Shinjuku"])
+
+    @patch("services.stayingapi_hotel.fetch_coordinates")
+    def test_city_less_results_are_judged_by_distance_not_dropped(self, mock_geocode):
+        # The regression this fixes: airbnb/google carry no city, so the old
+        # name-match filter discarded all of them.
+        mock_geocode.return_value = (35.6937632, 139.7036319)
+        service = self._service()
+        cityless_near = self._raw("Airbnb Near", 35.7000, 139.7036, city=None)
+        cityless_far = self._raw("Airbnb Far", 35.8745, 139.7036, city=None)
+        service._request_search = MagicMock(return_value=[cityless_near, cityless_far])
+
+        hotels = service.search_hotels(
+            destination="Tokyo", check_in_date="2026-11-17", check_out_date="2026-11-21",
+            preferred_area="Shinjuku",
+        )
+
+        self.assertEqual([h["name"] for h in hotels], ["Airbnb Near"])
+
+    @patch("services.stayingapi_hotel.fetch_coordinates")
+    def test_ungeocodable_area_falls_back_to_name_matching(self, mock_geocode):
+        # Keep a typo'd or unlisted area from silently returning nothing, and keep
+        # the mock path (which has no coordinates to measure) working.
+        mock_geocode.return_value = None
+        service = self._service()
+        matching = self._raw("Riverside Inn", 35.8745, 139.7036, city="Riverside")
+        other = self._raw("Downtown", 35.8745, 139.7036, city="Uptown")
+        service._request_search = MagicMock(return_value=[matching, other])
+
+        hotels = service.search_hotels(
+            destination="Tokyo", check_in_date="2026-11-17", check_out_date="2026-11-21",
+            preferred_area="Riverside",
+        )
+
+        self.assertEqual([h["name"] for h in hotels], ["Riverside Inn"])
+
+    @patch("services.stayingapi_hotel.fetch_coordinates")
+    def test_no_preferred_area_skips_geocoding(self, mock_geocode):
+        service = self._service()
+        service._request_search = MagicMock(return_value=[self._raw("Anywhere", 35.8745, 139.7036)])
+
+        hotels = service.search_hotels(
+            destination="Tokyo", check_in_date="2026-11-17", check_out_date="2026-11-21",
+        )
+
+        mock_geocode.assert_not_called()
+        self.assertEqual(len(hotels), 1)
 
 
 class MockHotelSearchTests(unittest.TestCase):

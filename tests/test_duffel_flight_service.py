@@ -128,6 +128,24 @@ class ParseSegmentTests(unittest.TestCase):
         self.assertEqual(leg["depart_time"], "17:30:00")
         self.assertEqual(leg["arrival_time"], "20:40:00")
         self.assertEqual(leg["departure_date"], "2026-09-10")
+        self.assertEqual(leg["arrival_date"], "2026-09-10")
+
+    def test_overnight_segment_reports_next_day_arrival_date(self):
+        segment = {
+            "origin": {"iata_code": "HKG"},
+            "destination": {"iata_code": "LHR"},
+            "departing_at": "2026-09-10T23:30:00",
+            "arriving_at": "2026-09-11T06:15:00",
+            "operating_carrier": {"iata_code": "CX", "name": "Cathay Pacific"},
+        }
+        leg = _parse_segment(segment)
+        self.assertEqual(leg["departure_date"], "2026-09-10")
+        self.assertEqual(leg["arrival_date"], "2026-09-11")
+
+    def test_missing_arriving_at_yields_empty_arrival_date(self):
+        leg = _parse_segment({"departing_at": "2026-09-10T17:30:00"})
+        self.assertEqual(leg["arrival_time"], "")
+        self.assertEqual(leg["arrival_date"], "")
 
 
 class MockFlightSearchTests(unittest.TestCase):
