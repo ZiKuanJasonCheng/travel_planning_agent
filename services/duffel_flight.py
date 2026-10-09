@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import time
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from urllib import error, request
 
@@ -122,6 +123,7 @@ def _parse_segment(segment: Dict[str, Any]) -> Dict[str, Any]:
         "depart_time": depart_at.split("T")[1][:8] if "T" in depart_at else "",
         "arrival_time": arrival_at.split("T")[1][:8] if "T" in arrival_at else "",
         "departure_date": depart_at.split("T")[0] if "T" in depart_at else "",
+        "arrival_date": arrival_at.split("T")[0] if "T" in arrival_at else "",
     }
 
 
@@ -318,8 +320,15 @@ class DuffelFlightService:
         """Mock flight search for development/testing when API credentials are not available."""
 
         def _leg(airline, frm, to, depart, arrival, date):
+            # Arriving earlier on the clock than the departure means the leg lands the
+            # next day, so the mock reports the same arrival_date a live leg would.
+            arrival_date = date
+            if arrival < depart:
+                arrival_date = (
+                    datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)
+                ).strftime("%Y-%m-%d")
             return {"airline": airline, "from": frm, "to": to, "depart_time": depart,
-                     "arrival_time": arrival, "departure_date": date}
+                     "arrival_time": arrival, "departure_date": date, "arrival_date": arrival_date}
 
         raw_candidates = [
             {
