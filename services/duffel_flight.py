@@ -19,6 +19,18 @@ DUFFEL_API_BASE_URL = "https://api.duffel.com"
 DUFFEL_API_VERSION = "v2"
 
 
+def _is_timeout(url_error: "error.URLError") -> bool:
+    """Whether a URLError was caused by a timeout rather than, say, a dead host.
+
+    urllib wraps the underlying cause in `.reason`, which is not always an
+    exception — it can be a plain string — so this checks defensively. A timeout
+    means the traveler should retry, which is worth saying distinctly from a
+    connection or API status error.
+    """
+    reason = getattr(url_error, "reason", None)
+    return isinstance(reason, TimeoutError) or "timed out" in str(reason).lower()
+
+
 def _is_redeye(depart_time_str: str) -> bool:
     """Return True if departure time falls in the red-eye window (23:30-05:29)."""
     try:
@@ -232,8 +244,21 @@ class DuffelFlightService:
             return result
 
         except error.HTTPError as http_error:
+            # Must precede URLError: HTTPError is a URLError subclass and would
+            # otherwise be swallowed there, misfiling an API status error.
             logger.error(f"Duffel API Error: {http_error}")
             return [{"type": "flight", "reason": "Duffel API error"}]
+        except error.URLError as url_error:
+            # No response arrived at all. A read timeout is the traveler's cue to
+            # retry, so it is reported distinctly from an API status error.
+            if _is_timeout(url_error):
+                logger.error(f"Duffel API timeout: {url_error}")
+                return [{"type": "flight", "reason": "Duffel API timeout"}]
+            logger.error(f"Duffel API connection error: {url_error}")
+            return [{"type": "flight", "reason": "Duffel API error"}]
+        except TimeoutError as timeout_error:
+            logger.error(f"Duffel API timeout: {timeout_error}")
+            return [{"type": "flight", "reason": "Duffel API timeout"}]
         except Exception as e:
             logger.error(f"Error searching flights: {e}")
             return [{"type": "flight", "reason": "Unknown error"}]

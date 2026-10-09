@@ -28,6 +28,24 @@ _JOB_POLL_TIMEOUT_SECONDS = 150
 _PREFERRED_AREA_RADIUS_KM = 5.0
 
 
+class HotelJobFailedError(RuntimeError):
+    """StayingAPI reported status "failed" for the search job."""
+
+
+class HotelJobTimeoutError(RuntimeError):
+    """The search job did not complete before `_JOB_POLL_TIMEOUT_SECONDS`."""
+
+
+def _is_timeout(url_error: "error.URLError") -> bool:
+    """Whether a URLError was caused by a timeout rather than, say, a dead host.
+
+    urllib wraps the underlying cause in `.reason`, which is not always an
+    exception — it can be a plain string — so this checks defensively.
+    """
+    reason = getattr(url_error, "reason", None)
+    return isinstance(reason, TimeoutError) or "timed out" in str(reason).lower()
+
+
 def _default_check_in_date() -> str:
     return (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
 
@@ -261,13 +279,34 @@ class StayingAPIHotelService:
                 hotels.append(hotel)
 
             hotels.sort(key=lambda item: item.get("price_per_night", 10**9))
-            result = hotels[:5]
+            result = hotels[:20]
             self._cache[cache_key] = (time.time(), result)
             return result
 
+        except HotelJobTimeoutError as timeout_error:
+            # Distinct from an empty result: the search may well have hotels, we just
+            # never got the answer. Not cached — a retry should reach the API again.
+            logger.error(f"StayingAPI Hotel API timeout: {timeout_error}")
+            return [{"reason": "StayingAPI Hotel API timeout"}]
+        except HotelJobFailedError as job_error:
+            logger.error(f"StayingAPI Hotel API job failed: {job_error}")
+            return [{"reason": "StayingAPI Hotel API error"}]
         except error.HTTPError as http_error:
+            # Must precede URLError: HTTPError is a URLError subclass and would
+            # otherwise be swallowed there, losing the response body in the log.
             logger.error(f"StayingAPI Hotel API Error: {http_error}, Response body: {http_error.read().decode('utf-8')}")
             return [{"reason": "StayingAPI Hotel API error"}]
+        except error.URLError as url_error:
+            # No response arrived at all. A socket-level timeout is the traveler's cue
+            # to retry, so it is reported the same way a job-level timeout is.
+            if _is_timeout(url_error):
+                logger.error(f"StayingAPI Hotel API timeout (socket): {url_error}")
+                return [{"reason": "StayingAPI Hotel API timeout"}]
+            logger.error(f"StayingAPI Hotel API connection error: {url_error}")
+            return [{"reason": "StayingAPI Hotel API error"}]
+        except TimeoutError as timeout_error:
+            logger.error(f"StayingAPI Hotel API timeout: {timeout_error}")
+            return [{"reason": "StayingAPI Hotel API timeout"}]
         except Exception as e:
             logger.error(f"Error searching hotels: {e}")
             return [{"reason": "Unknown error"}]
@@ -291,21 +330,30 @@ class StayingAPIHotelService:
         return []
 
     def _poll_job(self, poll_url: str) -> Dict[str, Any]:
+        """Poll a search job until it completes, raising if it fails or runs long.
+
+        A failed or over-long job must not be reported as an empty result list, which
+        is indistinguishable from "this city has no hotels" and would quietly hand the
+        traveler a fallback hotel. Raise instead, so `search_hotels` can label it.
+        """
         deadline = time.time() + _JOB_POLL_TIMEOUT_SECONDS
-        #logger.info(f"deadline: {deadline}", extra={"to_terminal": False})
         url = f"https://api.stayingapi.com{poll_url}" if poll_url.startswith("/") else poll_url
-        #logger.info(f"url: {url}", extra={"to_terminal": False})
         while time.time() < deadline:
             body = self._get_json(url)
-            #logger.info(f"body: {body}", extra={"to_terminal": False})
             status = (body.get("data") or {}).get("status")
-            #logger.info(f"status: {status}", extra={"to_terminal": False})
             if status == "completed":
                 return {"data": (body.get("data") or {}).get("result")}
             if status == "failed":
-                return {"data": {"results": []}}
+                logger.error(f"_poll_job(): StayingAPI reported the search job as failed (url={url})")
+                raise HotelJobFailedError("StayingAPI search job failed")
             time.sleep(_JOB_POLL_INTERVAL_SECONDS)
-        return {"data": {"results": []}}
+
+        logger.error(
+            f"_poll_job(): search job did not complete within {_JOB_POLL_TIMEOUT_SECONDS}s (url={url})"
+        )
+        raise HotelJobTimeoutError(
+            f"StayingAPI search job exceeded {_JOB_POLL_TIMEOUT_SECONDS}s"
+        )
 
     def _get_json(self, url: str) -> Dict[str, Any]:
         req = request.Request(

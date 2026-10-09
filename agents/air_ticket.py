@@ -18,7 +18,7 @@ from services.llm_flight_selector_service import select_flights
 logger = logging.getLogger(__name__)
 
 
-_ERROR_REASONS = {"Duffel API error", "Unknown error"}
+_ERROR_REASONS = {"Duffel API error", "Duffel API timeout", "Unknown error"}
 
 _NO_RESULTS_MESSAGE = {
     "reason": "No suitable flights were found. Please change your flight preferences and submit feedback again."
