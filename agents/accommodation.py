@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 logger = logging.getLogger(__name__)
 
 
-_ERROR_REASONS = {"StayingAPI Hotel API error", "Unknown error"}
+_ERROR_REASONS = {"StayingAPI Hotel API error", "StayingAPI Hotel API timeout", "Unknown error"}
 
 _ERROR_MESSAGE = {
     "reason": (

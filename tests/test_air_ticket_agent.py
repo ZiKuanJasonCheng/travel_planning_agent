@@ -219,6 +219,16 @@ class SplitCandidatesTests(unittest.TestCase):
         self.assertTrue(has_errors)
         self.assertFalse(all_errors)
 
+    def test_timeout_counts_as_an_error_tier(self):
+        # A timeout must not be mistaken for a real flight candidate, or the
+        # traveler would be shown an error string as a bookable option.
+        from agents.air_ticket import _split_candidates
+        candidates = [{"reason": "Duffel API timeout"}]
+        valid, has_errors, all_errors = _split_candidates(candidates)
+        self.assertEqual(valid, [])
+        self.assertTrue(has_errors)
+        self.assertTrue(all_errors)
+
 
 class ResolveOneWayDirectionTests(unittest.TestCase):
     def _candidate(self, price, airline="CX"):

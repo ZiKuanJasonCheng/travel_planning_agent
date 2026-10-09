@@ -202,6 +202,21 @@ class AccommodationAgentSkipLogicTests(unittest.TestCase):
             new_state["accommodation_options"][0]["reason"],
         )
 
+    @patch("agents.accommodation.get_stayingapi_hotel_service")
+    def test_timeout_result_produces_the_error_message_not_a_fallback_hotel(self, mock_duffel):
+        # A timeout is not "no hotels exist" — it must reach the traveler as a
+        # retryable error rather than a fabricated fallback hotel.
+        mock_service = MagicMock()
+        mock_service.search_hotels.return_value = [{"reason": "StayingAPI Hotel API timeout"}]
+        mock_duffel.return_value = mock_service
+
+        state = self._base_state(new_constraints={"accommodation": {"preference": {"area": "Shibuya"}}})
+        new_state = accommodation_agent(state)
+
+        option = new_state["accommodation_options"][0]
+        self.assertIn("StayingAPI Hotel API error (or unknown error)", option["reason"])
+        self.assertNotIn("Fallback Hotel", option.get("name", ""))
+
 
 class HotelSelectionTests(unittest.TestCase):
     """accommodation_agent hands the shortlist to the LLM selector after search."""

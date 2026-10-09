@@ -4,7 +4,13 @@ from unittest.mock import MagicMock, patch
 from urllib import error as urllib_error
 
 from services import duffel_flight
-from services.duffel_flight import _apply_leg_prices, _passes_preference, _cache_key, _parse_segment
+from services.duffel_flight import (
+    _apply_leg_prices,
+    _is_timeout,
+    _passes_preference,
+    _cache_key,
+    _parse_segment,
+)
 
 
 class ApplyLegPricesTests(unittest.TestCase):
@@ -294,6 +300,40 @@ class SearchFlightsTests(unittest.TestCase):
 
         result = service.search_flights(origin="HKG", destination="KIX", departure_date="2026-09-10")
         self.assertEqual(result, [{"type": "flight", "reason": "Unknown error"}])
+
+    @patch("urllib.request.urlopen")
+    def test_read_timeout_returns_duffel_timeout_reason(self, mock_urlopen):
+        # urllib wraps a read timeout in URLError(TimeoutError). Reporting it as
+        # "Unknown error" hid a retryable condition behind a generic label.
+        service = self._service()
+        mock_urlopen.side_effect = urllib_error.URLError(TimeoutError("timed out"))
+
+        result = service.search_flights(origin="HKG", destination="KIX", departure_date="2026-09-10")
+        self.assertEqual(result, [{"type": "flight", "reason": "Duffel API timeout"}])
+
+    @patch("urllib.request.urlopen")
+    def test_bare_socket_timeout_returns_duffel_timeout_reason(self, mock_urlopen):
+        service = self._service()
+        mock_urlopen.side_effect = TimeoutError("timed out")
+
+        result = service.search_flights(origin="HKG", destination="KIX", departure_date="2026-09-10")
+        self.assertEqual(result, [{"type": "flight", "reason": "Duffel API timeout"}])
+
+    @patch("urllib.request.urlopen")
+    def test_connection_error_returns_duffel_error_not_timeout(self, mock_urlopen):
+        # Unreachable host is an error, but retrying immediately won't help, so it
+        # must not be reported as a timeout.
+        service = self._service()
+        mock_urlopen.side_effect = urllib_error.URLError(ConnectionRefusedError("refused"))
+
+        result = service.search_flights(origin="HKG", destination="KIX", departure_date="2026-09-10")
+        self.assertEqual(result, [{"type": "flight", "reason": "Duffel API error"}])
+
+    def test_is_timeout_classifies_urlerror_reasons(self):
+        self.assertTrue(_is_timeout(urllib_error.URLError(TimeoutError("timed out"))))
+        self.assertTrue(_is_timeout(urllib_error.URLError("timed out")))
+        self.assertFalse(_is_timeout(urllib_error.URLError(ConnectionRefusedError("refused"))))
+        self.assertFalse(_is_timeout(urllib_error.URLError("Name or service not known")))
 
     @patch("urllib.request.urlopen")
     def test_inbound_failure_drops_whole_candidate_even_when_outbound_passes(self, mock_urlopen):

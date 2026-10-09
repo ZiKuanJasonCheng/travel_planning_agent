@@ -6,11 +6,14 @@ from urllib import error as urllib_error
 from services.stayingapi_hotel import (
     _default_check_in_date,
     _default_check_out_date,
+    _is_timeout,
     _nights,
     _passes_hotel_filters,
     _within_preferred_area,
     _cache_key,
     _parse_search_result,
+    HotelJobFailedError,
+    HotelJobTimeoutError,
     StayingAPIHotelService,
 )
 
@@ -443,7 +446,9 @@ class SearchHotelsTests(unittest.TestCase):
         self.assertEqual(mock_urlopen.call_count, 2)
 
     @patch("urllib.request.urlopen")
-    def test_pending_job_that_fails_returns_empty_list(self, mock_urlopen):
+    def test_pending_job_that_fails_returns_an_error_result(self, mock_urlopen):
+        # A failed job must not look like "this city has no hotels" — that would hand
+        # the traveler a fallback hotel instead of surfacing the problem.
         pending_response = self._mock_http_response(
             {"data": {"status": "pending", "jobId": "job_1", "pollUrl": "/v1/jobs/job_1"}}
         )
@@ -456,7 +461,124 @@ class SearchHotelsTests(unittest.TestCase):
                 destination="Tokyo", check_in_date="2026-09-10", check_out_date="2026-09-14",
             )
 
+        self.assertEqual(result, [{"reason": "StayingAPI Hotel API error"}])
+
+    def test_poll_job_that_outlasts_the_deadline_raises_timeout(self):
+        # No urlopen here: `_get_json` is stubbed so the clock can be driven directly
+        # (patching time.time at module scope also hits logging's own time calls, so
+        # a fixed side_effect list is fragile — use an advancing clock instead).
+        service = self._service()
+        service._get_json = MagicMock(return_value={"data": {"status": "running"}})
+
+        ticks = iter(float(t) for t in range(0, 100_000, 1_000))
+
+        with patch("time.sleep"), patch(
+            "services.stayingapi_hotel.time.time", side_effect=lambda: next(ticks)
+        ):
+            with self.assertRaises(HotelJobTimeoutError):
+                service._poll_job("/v1/jobs/job_1")
+
+    def test_poll_job_that_fails_raises_job_failed(self):
+        service = self._service()
+        service._get_json = MagicMock(return_value={"data": {"status": "failed"}})
+
+        with self.assertRaises(HotelJobFailedError):
+            service._poll_job("/v1/jobs/job_1")
+
+    @patch("urllib.request.urlopen")
+    def test_pending_job_that_outlasts_the_deadline_returns_a_timeout_result(self, mock_urlopen):
+        pending_response = self._mock_http_response(
+            {"data": {"status": "pending", "jobId": "job_1", "pollUrl": "/v1/jobs/job_1"}}
+        )
+        mock_urlopen.return_value = pending_response
+        service = self._service()
+        service._poll_job = MagicMock(side_effect=HotelJobTimeoutError("slow"))
+
+        result = service.search_hotels(
+            destination="Tokyo", check_in_date="2026-09-10", check_out_date="2026-09-14",
+        )
+
+        self.assertEqual(result, [{"reason": "StayingAPI Hotel API timeout"}])
+
+    @patch("urllib.request.urlopen")
+    def test_socket_timeout_returns_a_timeout_result(self, mock_urlopen):
+        # urllib wraps a read timeout in URLError(TimeoutError) — the traveler should
+        # see the same retryable timeout as a job that ran long.
+        mock_urlopen.side_effect = urllib_error.URLError(TimeoutError("timed out"))
+        service = self._service()
+
+        result = service.search_hotels(
+            destination="Tokyo", check_in_date="2026-09-10", check_out_date="2026-09-14",
+        )
+
+        self.assertEqual(result, [{"reason": "StayingAPI Hotel API timeout"}])
+
+    @patch("urllib.request.urlopen")
+    def test_connection_error_returns_an_api_error_result(self, mock_urlopen):
+        # Unreachable host: an error, but not a timeout — the traveler shouldn't be
+        # told to simply retry.
+        mock_urlopen.side_effect = urllib_error.URLError(ConnectionRefusedError("refused"))
+        service = self._service()
+
+        result = service.search_hotels(
+            destination="Tokyo", check_in_date="2026-09-10", check_out_date="2026-09-14",
+        )
+
+        self.assertEqual(result, [{"reason": "StayingAPI Hotel API error"}])
+
+    @patch("urllib.request.urlopen")
+    def test_http_error_still_returns_an_api_error_result(self, mock_urlopen):
+        # HTTPError subclasses URLError, so this pins the handler ordering: it must
+        # not be classified as a timeout or misfiled by the URLError clause.
+        mock_urlopen.side_effect = urllib_error.HTTPError("http://x", 500, "Server Error", {}, None)
+        service = self._service()
+
+        result = service.search_hotels(
+            destination="Tokyo", check_in_date="2026-09-10", check_out_date="2026-09-14",
+        )
+
+        self.assertEqual(result, [{"reason": "StayingAPI Hotel API error"}])
+
+    def test_is_timeout_classifies_urlerror_reasons(self):
+        self.assertTrue(_is_timeout(urllib_error.URLError(TimeoutError("timed out"))))
+        self.assertTrue(_is_timeout(urllib_error.URLError("timed out")))
+        self.assertFalse(_is_timeout(urllib_error.URLError(ConnectionRefusedError("refused"))))
+        self.assertFalse(_is_timeout(urllib_error.URLError("Name or service not known")))
+
+    @patch("urllib.request.urlopen")
+    def test_completed_job_with_no_results_is_a_genuine_empty_result(self, mock_urlopen):
+        # The distinction the error handling exists to preserve.
+        pending_response = self._mock_http_response(
+            {"data": {"status": "pending", "jobId": "job_1", "pollUrl": "/v1/jobs/job_1"}}
+        )
+        completed_empty = self._mock_http_response(
+            {"data": {"status": "completed", "result": {"results": []}}}
+        )
+        mock_urlopen.side_effect = [pending_response, completed_empty]
+        service = self._service()
+
+        with patch("time.sleep"):
+            result = service.search_hotels(
+                destination="Tokyo", check_in_date="2026-09-10", check_out_date="2026-09-14",
+            )
+
         self.assertEqual(result, [])
+
+    @patch("urllib.request.urlopen")
+    def test_error_results_are_not_cached(self, mock_urlopen):
+        # A timeout shouldn't shadow the query for the cache TTL.
+        pending_response = self._mock_http_response(
+            {"data": {"status": "pending", "jobId": "job_1", "pollUrl": "/v1/jobs/job_1"}}
+        )
+        failed_response = self._mock_http_response({"data": {"status": "failed"}})
+        mock_urlopen.side_effect = [pending_response, failed_response]
+        service = self._service()
+        kwargs = dict(destination="Tokyo", check_in_date="2026-09-10", check_out_date="2026-09-14")
+
+        with patch("time.sleep"):
+            service.search_hotels(**kwargs)
+
+        self.assertEqual(service._cache, {})
 
 
 if __name__ == "__main__":
