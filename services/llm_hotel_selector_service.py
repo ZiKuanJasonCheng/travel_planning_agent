@@ -13,7 +13,6 @@ must commit.
 """
 import json
 import logging
-import math
 from typing import Optional
 
 from services.langfuse_client import observe, update_current_generation
@@ -34,19 +33,6 @@ _LATE_ARRIVAL_HOUR = 21
 # through, so the room they need is the one they land into. From 04:00 onward the
 # traveler is effectively arriving on the new day and night 1 no longer exists.
 _SMALL_HOURS_CUTOFF_HOUR = 4
-
-
-def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Great-circle distance between two coordinates, in kilometres."""
-    radius_km = 6371.0
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    d_phi = math.radians(lat2 - lat1)
-    d_lambda = math.radians(lon2 - lon1)
-    a = (
-        math.sin(d_phi / 2) ** 2
-        + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
-    )
-    return 2 * radius_km * math.asin(math.sqrt(a))
 
 
 def _minutes(hhmmss: Optional[str]) -> Optional[int]:
@@ -136,7 +122,7 @@ _SELECT_TOOL = {
 }
 
 
-_SYSTEM_PROMPT = """\
+_SYSTEM_PROMPT = f"""\
 You are a travel assistant choosing accommodation for a traveler from a shortlist of \
 hotel candidates. Weigh price, location, distance to the airport, and how well each \
 candidate matches the traveler's stated preferences.
@@ -148,11 +134,11 @@ calculate yourself.
 
 Splitting the stay across two hotels is sometimes right and sometimes wrong, so judge \
 it from the arrival information:
-- If the traveler lands late in the evening or in the small hours after a flight that \
-departed the previous day, the first night is best spent at a hotel near the airport, \
+- If the traveler's flight departs on the first day of the stay and lands at or after \
+{_LATE_ARRIVAL_HOUR}:00, the first night is best spent at a hotel near the airport, \
 with a better-placed hotel (closer to what they came to see) for the remaining nights.
-- If the arrival is a normal daytime or early-evening arrival, book a single hotel for \
-the whole stay.
+- If the arrival is a normal daytime or early-evening arrival (before \
+{_LATE_ARRIVAL_HOUR}:00), book a single hotel for the whole stay.
 - If there is no night 1 in the window at all, book a single hotel for the whole stay.
 Never return a split that would leave an uncovered night, and never book more hotels \
 than the window can support (a one-night window is one hotel).
