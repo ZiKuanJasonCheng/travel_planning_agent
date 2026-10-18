@@ -98,8 +98,12 @@ def _get_airports() -> dict:
     return _airports
 
 
-def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Great-circle distance in kilometres between two (lat, lon) points."""
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance in kilometres between two (lat, lon) points.
+
+    Shared by the nearest-airport search and the hotel service, which both measure
+    coordinate pairs; keep this the single implementation.
+    """
     R = 6371.0
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
     dphi = math.radians(lat2 - lat1)
@@ -126,7 +130,7 @@ def _geocode_and_find_nearest(city: str) -> list[str]:
         a_lon = airport.get("lon")
         if a_lat is None or a_lon is None:
             continue
-        dist = _haversine_km(city_lat, city_lon, float(a_lat), float(a_lon))
+        dist = haversine_km(city_lat, city_lon, float(a_lat), float(a_lon))
         if dist <= _NEAREST_AIRPORT_RADIUS_KM:
             candidates.append((dist, airport))
 

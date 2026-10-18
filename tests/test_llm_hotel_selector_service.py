@@ -2,9 +2,9 @@ import json
 import unittest
 from unittest.mock import MagicMock, patch
 
+from services.city_iata_resolver import haversine_km
 from services.llm_hotel_selector_service import (
     _candidates_summary,
-    _haversine_km,
     resolve_check_in_date,
     select_hotels,
 )
@@ -86,16 +86,16 @@ def _selection_response(stays):
 
 class HaversineTests(unittest.TestCase):
     def test_same_point_is_zero(self):
-        self.assertEqual(_haversine_km(35.0, 139.0, 35.0, 139.0), 0.0)
+        self.assertEqual(haversine_km(35.0, 139.0, 35.0, 139.0), 0.0)
 
     def test_known_distance_hong_kong_to_tokyo(self):
         # HKG (22.3089, 113.9145) to NRT (35.7647, 140.3864) is ~2,950 km.
-        distance = _haversine_km(22.3089, 113.9145, 35.7647, 140.3864)
+        distance = haversine_km(22.3089, 113.9145, 35.7647, 140.3864)
         self.assertAlmostEqual(distance, 2958, delta=25)
 
     def test_one_degree_of_longitude_at_equator(self):
         # ~111.19 km per degree of longitude at the equator.
-        self.assertAlmostEqual(_haversine_km(0.0, 0.0, 0.0, 1.0), 111.19, delta=0.5)
+        self.assertAlmostEqual(haversine_km(0.0, 0.0, 0.0, 1.0), 111.19, delta=0.5)
 
 
 class ResolveCheckInDateTests(unittest.TestCase):

@@ -48,7 +48,7 @@ def build_graph():
 
     # Format the client-facing payload, then pause for user feedback
     builder.add_edge("final_output", "human_feedback")
-    builder.add_edge("human_feedback", END)
+    builder.add_edge("human_feedback", END)  #workflow.set_finish_point("human_feedback")
 
     # Compile graph
     trip_graph = builder.compile()

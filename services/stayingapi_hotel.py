@@ -11,11 +11,10 @@ from datetime import date, datetime, timedelta
 from typing import Optional, List, Dict, Any
 from urllib import error, request
 
-from services.city_iata_resolver import get_airport_coords
+from services.city_iata_resolver import get_airport_coords, haversine_km
 from services.currency import to_usd
 from services.geocoding import fetch_coordinates
 from services.langfuse_client import observe
-from services.llm_hotel_selector_service import _haversine_km
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +93,7 @@ def _within_preferred_area(
         return True
 
     try:
-        distance = _haversine_km(
+        distance = haversine_km(
             float(hotel_lat), float(hotel_lon), area_coords[0], area_coords[1]
         )
     except (TypeError, ValueError) as e:
@@ -153,7 +152,7 @@ def _parse_search_result(
     if airport_coords and lat is not None and lon is not None:
         try:
             distance_to_airport_km = round(
-                _haversine_km(float(lat), float(lon), airport_coords[0], airport_coords[1]), 1
+                haversine_km(float(lat), float(lon), airport_coords[0], airport_coords[1]), 1
             )
         except (TypeError, ValueError) as e:
             logger.error(f"An error occurred while calculating distance between an airport and a hotel. Error message: {e}", extra={"to_terminal": False})
