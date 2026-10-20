@@ -79,8 +79,14 @@ def attraction_agent(state: TripState) -> TripState:
     arrival_time = outbound_legs[-1].get("arrival_time") if outbound_legs else None
     return_depart_time = inbound_legs[0].get("depart_time") if inbound_legs else None
     hotel_area = hotel.get("area")
-    hotel_lat = hotel.get("lat")
-    hotel_lon = hotel.get("lon")
+    # Every hotel the traveler will sleep in, in stay order. The first is the
+    # airport hotel on a late-arrival split stay, so planning around it alone
+    # would place the whole trip next to the airport. An errored accommodation
+    # round leaves a reason-only placeholder, which is not a hotel.
+    stays = [
+        option for option in (state.get("accommodation_options") or [])
+        if option.get("name") or option.get("area") or option.get("lat") is not None
+    ]
 
     # Step 2: Extract constraints
     preference = merged.get("preference") or {}
@@ -113,7 +119,6 @@ def attraction_agent(state: TripState) -> TripState:
                 existing_itinerary=existing_itinerary,
                 destination=destination,
                 days=days,
-                hotel_area=hotel_area,
                 arrival_time=arrival_time,
                 styles=styles,
                 exclusions=exclusions,
@@ -123,16 +128,14 @@ def attraction_agent(state: TripState) -> TripState:
                 origin=origin,
                 return_depart_time=return_depart_time,
                 critique=checker_critique,
-                hotel_lat=hotel_lat,
-                hotel_lon=hotel_lon,
                 start_date=start_date,
                 end_date=end_date,
+                stays=stays,
             )
         else:
             itinerary = llm_service.generate_itinerary(
                 destination=destination,
                 days=days,
-                hotel_area=hotel_area,
                 arrival_time=arrival_time,
                 start_date=start_date,
                 end_date=end_date,
@@ -144,17 +147,16 @@ def attraction_agent(state: TripState) -> TripState:
                 origin=origin,
                 return_depart_time=return_depart_time,
                 critique=checker_critique,
-                hotel_lat=hotel_lat,
-                hotel_lon=hotel_lon,
+                stays=stays,
             )
 
         if _had_errors(itinerary):
             itinerary = existing_itinerary if has_real_existing_itinerary else [dict(_ERROR_MESSAGE, day=None, activities=[])]
         elif not itinerary:
-            itinerary = _build_fallback_itinerary(destination, days, hotel_area, hotel_lat, hotel_lon)
+            itinerary = _build_fallback_itinerary(destination, days, hotel_area)
     except Exception as e:
         logger.error(f"attraction_agent(): unexpected error: {e}")
-        itinerary = _build_fallback_itinerary(destination, days, hotel_area, hotel_lat, hotel_lon)
+        itinerary = _build_fallback_itinerary(destination, days, hotel_area)
 
     # Step 5: log_trace at exit
     if state.get("log_trace"):
@@ -179,9 +181,7 @@ def attraction_agent(state: TripState) -> TripState:
 def _build_fallback_itinerary(
     destination: str,
     days: int,
-    hotel_area: str | None,
-    hotel_lat: float | None = None,
-    hotel_lon: float | None = None,
+    hotel_area: str | None
 ) -> list[dict]:
     """Static fallback when the LLM service is unavailable."""
     area = hotel_area or destination

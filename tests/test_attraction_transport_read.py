@@ -53,6 +53,74 @@ class AttractionTransportReadTests(unittest.TestCase):
         self.assertEqual(call_kwargs["return_depart_time"], "19:00:00")
 
 
+class AttractionHotelPassingTests(unittest.TestCase):
+    def _state(self, accommodation_options):
+        return {
+            "destination": "Tokyo", "origin": "Hong Kong", "days": 3, "num_people": 2,
+            "start_date": "2026-11-17", "constraints": {}, "new_constraints": {},
+            "transport_options": {"railway": [], "flight": {"outbound": [], "inbound": []}},
+            "accommodation_options": accommodation_options,
+            "itinerary": None, "checker_critique": None,
+            "log_trace": False, "traces": [], "dirty_agents": [],
+        }
+
+    def _split_stays(self):
+        return [
+            {
+                "name": "Airport Inn", "area": "Narita", "lat": 35.7, "lon": 140.3,
+                "check_in_date": "2026-11-17", "check_out_date": "2026-11-18",
+            },
+            {
+                "name": "City Central", "area": "Shinjuku", "lat": 35.69, "lon": 139.7,
+                "check_in_date": "2026-11-18", "check_out_date": "2026-11-20",
+            },
+        ]
+
+    @patch("agents.attraction.get_llm_itinerary_service")
+    def test_split_stay_passes_every_hotel_to_the_planner(self, mock_get_svc):
+        mock_svc = MagicMock()
+        mock_svc.generate_itinerary.return_value = [{"day": 1, "activities": []}]
+        mock_get_svc.return_value = mock_svc
+
+        from agents.attraction import attraction_agent
+        attraction_agent(self._state(self._split_stays()))
+
+        call_kwargs = mock_svc.generate_itinerary.call_args.kwargs
+        self.assertEqual(
+            [stay["name"] for stay in call_kwargs["stays"]], ["Airport Inn", "City Central"]
+        )
+        self.assertNotIn("hotel_area", call_kwargs)
+
+    @patch("agents.attraction.get_llm_itinerary_service")
+    def test_update_path_also_passes_every_hotel(self, mock_get_svc):
+        mock_svc = MagicMock()
+        mock_svc.update_itinerary.return_value = [{"day": 1, "activities": []}]
+        mock_get_svc.return_value = mock_svc
+
+        from agents.attraction import attraction_agent
+        state = self._state(self._split_stays())
+        state["itinerary"] = [{"day": 1, "activities": [{"name": "Senso-ji", "reason": "LLM generated activity"}]}]
+        state["new_constraints"] = {"attraction": {"preference": {"styles": ["food"]}}}
+        attraction_agent(state)
+
+        call_kwargs = mock_svc.update_itinerary.call_args.kwargs
+        self.assertEqual(len(call_kwargs["stays"]), 2)
+
+    @patch("agents.attraction.get_llm_itinerary_service")
+    def test_error_placeholder_is_not_passed_as_a_hotel(self, mock_get_svc):
+        """An errored accommodation round persists a reason-only dict, which
+        must not surface to the planner as a hotel to plan around."""
+        mock_svc = MagicMock()
+        mock_svc.generate_itinerary.return_value = [{"day": 1, "activities": []}]
+        mock_get_svc.return_value = mock_svc
+
+        from agents.attraction import attraction_agent
+        attraction_agent(self._state([{"reason": "StayingAPI Hotel API error"}]))
+
+        call_kwargs = mock_svc.generate_itinerary.call_args.kwargs
+        self.assertEqual(call_kwargs["stays"], [])
+
+
 class AttractionAgentSkipLogicTests(unittest.TestCase):
     def _base_state(self, **overrides):
         state = {

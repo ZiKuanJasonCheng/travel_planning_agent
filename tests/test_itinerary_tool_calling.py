@@ -183,5 +183,108 @@ class DateThreadingTests(unittest.TestCase):
         self.assertIn("2027-06-28 to 2027-07-05", prompt)
 
 
+class HotelAwarePromptTests(unittest.TestCase):
+
+    def _service(self):
+        service = LLMItineraryService.__new__(LLMItineraryService)
+        service.client = MagicMock()
+        service.client.chat.completions.create.return_value = _answer_response()
+        return service
+
+    def _split_stays(self):
+        return [
+            {
+                "name": "Airport Inn", "area": "Narita", "lat": 35.7, "lon": 140.3,
+                "check_in_date": "2026-11-17", "check_out_date": "2026-11-18",
+            },
+            {
+                "name": "City Central", "area": "Shinjuku", "lat": 35.69, "lon": 139.7,
+                "check_in_date": "2026-11-18", "check_out_date": "2026-11-21",
+            },
+        ]
+
+    def _prompt(self, service):
+        return service.client.chat.completions.create.call_args[1]["messages"][0]["content"]
+
+    def test_split_stay_names_both_hotels_with_their_nights(self):
+        service = self._service()
+        service.generate_itinerary(
+            destination="Tokyo", days=4, start_date="2026-11-17", stays=self._split_stays()
+        )
+        prompt = self._prompt(service)
+
+        self.assertIn("Airport Inn", prompt)
+        self.assertIn("City Central", prompt)
+        self.assertIn("night 1", prompt)
+        self.assertIn("nights 2-4", prompt)
+
+    def test_split_stay_marks_the_hotel_change_day_as_lighter(self):
+        service = self._service()
+        service.generate_itinerary(
+            destination="Tokyo", days=4, start_date="2026-11-17", stays=self._split_stays()
+        )
+        prompt = self._prompt(service)
+
+        self.assertIn("Day 2 (hotel change", prompt)
+        self.assertIn("plan a lighter day", prompt)
+
+    def test_single_stay_has_no_transfer_rule(self):
+        service = self._service()
+        service.generate_itinerary(
+            destination="Tokyo", days=3, start_date="2026-11-17",
+            stays=[{
+                "name": "City Central", "area": "Shinjuku",
+                "check_in_date": "2026-11-17", "check_out_date": "2026-11-20",
+            }],
+        )
+        prompt = self._prompt(service)
+
+        self.assertIn("City Central", prompt)
+        self.assertNotIn("plan a lighter day", prompt)
+
+    def test_travel_time_limit_is_stated_with_an_urban_default(self):
+        service = self._service()
+        service.generate_itinerary(
+            destination="Tokyo", days=3, start_date="2026-11-17", stays=self._split_stays()
+        )
+        prompt = self._prompt(service)
+
+        self.assertIn("2 hours or less", prompt)
+
+    def test_no_stays_omits_hotel_rules_entirely(self):
+        service = self._service()
+        service.generate_itinerary(destination="Tokyo", days=3, start_date="2026-11-17")
+        prompt = self._prompt(service)
+
+        self.assertNotIn("2 hours or less", prompt)
+        self.assertNotIn("hotel change", prompt)
+
+    def test_update_prompt_carries_the_transfer_day_too(self):
+        """A revision that drops the transfer rule would let day 2 fill back up."""
+        service = self._service()
+        service.update_itinerary(
+            existing_itinerary=[{"day": 1, "activities": []}],
+            destination="Tokyo", days=4, start_date="2026-11-17", stays=self._split_stays(),
+        )
+        prompt = self._prompt(service)
+
+        self.assertIn("Day 2 (hotel change", prompt)
+        self.assertIn("Airport Inn", prompt)
+
+    def test_missing_dates_still_yield_a_transfer_rule(self):
+        """Stay dates can be absent on fallback hotels; the lighter day still
+        has to be requested, just without a day number."""
+        service = self._service()
+        service.generate_itinerary(
+            destination="Tokyo", days=4,
+            stays=[{"name": "Airport Inn", "area": "Narita"},
+                   {"name": "City Central", "area": "Shinjuku"}],
+        )
+        prompt = self._prompt(service)
+
+        self.assertIn("change hotels", prompt)
+        self.assertIn("plan a lighter day", prompt)
+
+
 if __name__ == "__main__":
     unittest.main()
