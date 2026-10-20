@@ -6,6 +6,7 @@ directly from an LLM, without relying on packaged-tour APIs.
 import json
 import logging
 import os
+from datetime import date
 from typing import Optional
 
 from openai import APIError
@@ -54,6 +55,85 @@ _SHARED_RULES = """\
 """
 
 
+_HOTEL_RULES = """\
+- Getting around: an activity must be reachable from the hotel the traveler sleeps at that \
+night in 2 hours or less by the typical local mode of transport (metro, bus, train, taxi, or \
+driving). Prefer activities well inside that limit.
+- The 2-hour limit is a default for ordinary urban destinations. Judge for yourself whether it \
+fits this one, and relax it where honoring it would make the trip worse: very large metros where \
+a worthwhile sight legitimately sits further out, rural areas with sparse transport, and \
+wilderness destinations (desert, mountains, national parks) where long drives are part of the \
+trip. When you relax it, say so in short_desc.
+- Never plan two long-excursion activities on the same day, and never put a far excursion on a \
+travel-heavy day (arrival, hotel change, or departure day).\
+"""
+
+
+def _parse_date(value) -> Optional[date]:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def _stay_night_label(stay: dict, start_date: Optional[str]) -> str:
+    """Name which nights a stay covers, e.g. "night 1" or "nights 2-4".
+    Empty when the dates needed to work it out are missing."""
+    trip_start = _parse_date(start_date)
+    check_in = _parse_date(stay.get("check_in_date"))
+    check_out = _parse_date(stay.get("check_out_date"))
+    if not (trip_start and check_in and check_out):
+        return ""
+    first = (check_in - trip_start).days + 1
+    last = (check_out - trip_start).days
+    if first < 1 or last < first:
+        return ""
+    return f"night {first}" if first == last else f"nights {first}-{last}"
+
+
+def _hotel_lines(stays: list[dict], start_date: Optional[str]) -> list[str]:
+    lines = ["Hotels (the traveler changes hotels during the trip):" if len(stays) > 1 else "Hotel:"]
+    for index, stay in enumerate(stays, start=1):
+        details = [f"area: {stay.get('area') or 'unknown'}"]
+        lat, lon = stay.get("lat"), stay.get("lon")
+        if lat is not None and lon is not None:
+            details.append(f"coords: ({lat:.5f}, {lon:.5f})")
+        nights = _stay_night_label(stay, start_date)
+        if nights:
+            details.append(f"staying: {nights}")
+        if stay.get("check_in_date") and stay.get("check_out_date"):
+            details.append(f"{stay['check_in_date']} to {stay['check_out_date']}")
+        lines.append(f"  {index}. {stay.get('name') or 'Hotel'} — {'; '.join(details)}")
+    return lines
+
+
+def _transfer_rule(stays: list[dict], start_date: Optional[str]) -> Optional[str]:
+    """Ask for a lighter day when the traveler moves between hotels."""
+    if not stays or len(stays) < 2:
+        return None
+    leaving = stays[0].get("name") or stays[0].get("area") or "the first hotel"
+    arriving = stays[1].get("name") or stays[1].get("area") or "the second hotel"
+    move = f"check out of {leaving}, move to {arriving}"
+
+    trip_start = _parse_date(start_date)
+    check_in = _parse_date(stays[1].get("check_in_date"))
+    day = (check_in - trip_start).days + 1 if trip_start and check_in else None
+    if day is not None and day < 2:
+        day = None
+
+    if day:
+        return (
+            f"Day {day} (hotel change: {move}): plan a lighter day — at most 2 activities "
+            f"near {arriving}, and leave time for checkout and the transfer."
+        )
+    return (
+        f"On the day you change hotels ({move}): plan a lighter day — at most 2 activities "
+        f"near {arriving}, and leave time for checkout and the transfer."
+    )
+
+
 def _available_tools() -> Optional[list[dict]]:
     """The tool list to offer the model, or None when event search isn't configured.
 
@@ -69,7 +149,6 @@ def _available_tools() -> Optional[list[dict]]:
 def _build_context_lines(
     destination: str,
     days: int,
-    hotel_area: Optional[str],
     arrival_time: Optional[str],
     start_date: Optional[str],
     styles: Optional[list[str]],
@@ -79,17 +158,12 @@ def _build_context_lines(
     num_people: int = 1,
     origin: Optional[str] = None,
     return_depart_time: Optional[str] = None,
-    hotel_lat: Optional[float] = None,
-    hotel_lon: Optional[float] = None,
     end_date: Optional[str] = None,
+    stays: Optional[list[dict]] = None,
 ) -> str:
     parts = [f"Destination: {destination}", f"Trip duration: {days} day(s)", f"Number of travelers: {num_people}"]
     if origin:
         parts.append(f"Departing from: {origin}")
-    if hotel_area:
-        parts.append(f"Hotel location: {hotel_area}")
-    if hotel_lat is not None and hotel_lon is not None:
-        parts.append(f"Hotel coordinates: ({hotel_lat:.5f}, {hotel_lon:.5f})")
     # The end date matters for event search: the planner must query the whole
     # visit window, not just its first day.
     if start_date and end_date:
@@ -108,12 +182,19 @@ def _build_context_lines(
         parts.append(f"Must-visit places: {', '.join(must_go_places)}")
     if max_price_per_ticket is not None:
         parts.append(f"Max budget per activity/ticket: {max_price_per_ticket} USD (convert to local currency as needed)")
+    if stays:
+        parts.append("\n".join(_hotel_lines(stays, start_date)))
     return "\n".join(parts)
 
 
-def _day_rules(arrival_time: Optional[str], return_depart_time: Optional[str], days: int) -> str:
+def _day_rules(
+    arrival_time: Optional[str],
+    return_depart_time: Optional[str],
+    days: int,
+    transfer_rule: Optional[str] = None,
+) -> str:
     """Build prompt rules for day 1 and last day based on flight times."""
-    rules = []
+    rules = [transfer_rule] if transfer_rule else []
 
     if arrival_time:
         hour = int(arrival_time[:2])
@@ -145,7 +226,6 @@ class LLMItineraryService:
         self,
         destination: str,
         days: int,
-        hotel_area: Optional[str] = None,
         arrival_time: Optional[str] = None,
         start_date: Optional[str] = None,
         styles: Optional[list[str]] = None,
@@ -156,21 +236,31 @@ class LLMItineraryService:
         origin: Optional[str] = None,
         return_depart_time: Optional[str] = None,
         critique: Optional[str] = None,
-        hotel_lat: Optional[float] = None,
-        hotel_lon: Optional[float] = None,
         end_date: Optional[str] = None,
+        stays: Optional[list[dict]] = None,
     ) -> list[dict]:
         if not self.client:
             return []
 
+        stays = stays or []
         context = _build_context_lines(
-            destination, days, hotel_area, arrival_time, start_date,
-            styles, exclusions, must_go_places, max_price_per_ticket,
-            num_people=num_people, origin=origin, return_depart_time=return_depart_time,
-            hotel_lat=hotel_lat, hotel_lon=hotel_lon,
+            destination=destination,
+            days=days,
+            arrival_time=arrival_time,
+            start_date=start_date,
+            styles=styles,
+            exclusions=exclusions,
+            must_go_places=must_go_places,
+            max_price_per_ticket=max_price_per_ticket,
+            num_people=num_people,
+            origin=origin,
+            return_depart_time=return_depart_time,
             end_date=end_date,
+            stays=stays,
         )
-        flight_rules = _day_rules(arrival_time, return_depart_time, days)
+        transfer_rule = _transfer_rule(stays, start_date)
+        flight_rules = _day_rules(arrival_time, return_depart_time, days, transfer_rule)
+        hotel_rules = f"\n{_HOTEL_RULES}" if stays else ""
 
         prompt = f"""You are an expert travel planner. Create a detailed, realistic {days}-day itinerary.
 
@@ -182,7 +272,7 @@ If a tool is available for finding local events, you may use it to include somet
 
 Rules:
 {_SHARED_RULES}
-{flight_rules}
+{flight_rules}{hotel_rules}
 
 Respond ONLY with valid JSON matching this structure:
 {_ACTIVITY_SCHEMA}"""
@@ -197,7 +287,6 @@ Respond ONLY with valid JSON matching this structure:
         existing_itinerary: list[dict],
         destination: str,
         days: int,
-        hotel_area: Optional[str] = None,
         arrival_time: Optional[str] = None,
         styles: Optional[list[str]] = None,
         exclusions: Optional[list[str]] = None,
@@ -207,10 +296,9 @@ Respond ONLY with valid JSON matching this structure:
         origin: Optional[str] = None,
         return_depart_time: Optional[str] = None,
         critique: Optional[str] = None,
-        hotel_lat: Optional[float] = None,
-        hotel_lon: Optional[float] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
+        stays: Optional[list[dict]] = None,
     ) -> list[dict]:
         if not self.client:
             return []
@@ -231,14 +319,25 @@ Respond ONLY with valid JSON matching this structure:
             for day_plan in existing_itinerary
         ]
 
+        stays = stays or []
         context = _build_context_lines(
-            destination, days, hotel_area, arrival_time, start_date,
-            styles, exclusions, must_go_places, max_price_per_ticket,
-            num_people=num_people, origin=origin, return_depart_time=return_depart_time,
-            hotel_lat=hotel_lat, hotel_lon=hotel_lon,
+            destination=destination,
+            days=days,
+            arrival_time=arrival_time,
+            start_date=start_date,
+            styles=styles,
+            exclusions=exclusions,
+            must_go_places=must_go_places,
+            max_price_per_ticket=max_price_per_ticket,
+            num_people=num_people,
+            origin=origin,
+            return_depart_time=return_depart_time,
             end_date=end_date,
+            stays=stays,
         )
-        flight_rules = _day_rules(arrival_time, return_depart_time, days)
+        transfer_rule = _transfer_rule(stays, start_date)
+        flight_rules = _day_rules(arrival_time, return_depart_time, days, transfer_rule)
+        hotel_rules = f"\n{_HOTEL_RULES}" if stays else ""
 
         prompt = f"""You are an expert travel planner revising an existing itinerary based on updated traveler preferences.
 
@@ -256,7 +355,7 @@ If a tool is available for finding local events, you may use it to include somet
 
 Rules:
 {_SHARED_RULES}
-{flight_rules}
+{flight_rules}{hotel_rules}
 
 Respond ONLY with valid JSON matching this structure:
 {_ACTIVITY_SCHEMA}"""
