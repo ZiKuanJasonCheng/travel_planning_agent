@@ -65,7 +65,7 @@ class ResolveCategoryConstraintsTests(unittest.TestCase):
     def test_replanning_with_identical_merge_is_unchanged(self):
         from orchestration.merge_constraints import resolve_category_constraints
         state = {
-            "feedback": "business class please",
+            "feedback": ["business class please"],
             "constraints": {"accommodation": {"preference": {"max_price_per_night": 200}}},
             "new_constraints": {"accommodation": {"preference": {"max_price_per_night": 200}}},
         }
@@ -76,7 +76,7 @@ class ResolveCategoryConstraintsTests(unittest.TestCase):
     def test_replanning_with_differing_merge_is_changed(self):
         from orchestration.merge_constraints import resolve_category_constraints
         state = {
-            "feedback": "actually make it Shibuya",
+            "feedback": ["actually make it Shibuya"],
             "constraints": {"accommodation": {"preference": {"max_price_per_night": 200}}},
             "new_constraints": {"accommodation": {"preference": {"area": "Shibuya"}}},
         }
@@ -86,7 +86,7 @@ class ResolveCategoryConstraintsTests(unittest.TestCase):
 
     def test_missing_category_defaults_to_empty_dicts(self):
         from orchestration.merge_constraints import resolve_category_constraints
-        state = {"feedback": "some feedback", "constraints": {}, "new_constraints": {}}
+        state = {"feedback": ["some feedback"], "constraints": {}, "new_constraints": {}}
         merged, unchanged = resolve_category_constraints(state, "attraction")
         self.assertEqual(merged, {})
         self.assertTrue(unchanged)
@@ -96,7 +96,7 @@ class ResolveCategoryConstraintsTests(unittest.TestCase):
         .get(key, default) only substitutes the default when the key is missing,
         not when its value is falsy, so this must be handled explicitly."""
         from orchestration.merge_constraints import resolve_category_constraints
-        state = {"feedback": "some feedback", "constraints": None, "new_constraints": None}
+        state = {"feedback": ["some feedback"], "constraints": None, "new_constraints": None}
         merged, unchanged = resolve_category_constraints(state, "attraction")
         self.assertEqual(merged, {})
         self.assertTrue(unchanged)

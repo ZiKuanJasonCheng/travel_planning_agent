@@ -19,7 +19,7 @@ class ApplyUserFeedbackNewConstraintsTests(unittest.TestCase):
 
         from orchestration.human_feedback import apply_user_feedback
         state = self._base_state()
-        apply_user_feedback(state, "no layovers on the way there")
+        apply_user_feedback(state, ["no layovers on the way there"])
 
         self.assertEqual(
             state["new_constraints"],
@@ -30,7 +30,7 @@ class ApplyUserFeedbackNewConstraintsTests(unittest.TestCase):
     def test_no_parsed_constraints_leaves_new_constraints_unset(self, mock_parse):
         from orchestration.human_feedback import apply_user_feedback
         state = self._base_state()
-        result = apply_user_feedback(state, "")
+        result = apply_user_feedback(state, [""])
 
         self.assertFalse(result)
         self.assertNotIn("new_constraints", state)
@@ -48,7 +48,7 @@ class ApplyUserFeedbackNewConstraintsTests(unittest.TestCase):
             "constraints": {"transport": {"outbound_air_ticket_preference": {"flight_class": "business"}}},
             "dirty_agents": [],
         }
-        apply_user_feedback(state, "no layovers on the way there")
+        apply_user_feedback(state, ["no layovers on the way there"])
 
         # constraints must remain exactly what it was before — merging is each agent's job now
         self.assertEqual(
@@ -66,7 +66,7 @@ class ApplyUserFeedbackNewConstraintsTests(unittest.TestCase):
 
         from orchestration.human_feedback import apply_user_feedback
         state = self._base_state()
-        apply_user_feedback(state, "I want to stay in Shibuya")
+        apply_user_feedback(state, ["I want to stay in Shibuya"])
 
         # accommodation touched -> accommodation_agent dirty, plus its downstream dependent attraction_agent
         self.assertEqual(state["dirty_agents"], ["accommodation_agent", "attraction_agent"])

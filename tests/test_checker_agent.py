@@ -239,11 +239,11 @@ class CheckerAgentTests(unittest.TestCase):
         self.assertIn("Issue B", result["checker_critique"])
 
     @patch("agents.checker.evaluate_itinerary", side_effect=Exception("timeout"))
-    def test_llm_failure_treated_as_pass(self, mock_eval):
-        from agents.checker import checker_agent
+    def test_llm_failure_records_marker_not_a_pass(self, mock_eval):
+        from agents.checker import checker_agent, LLM_FAILED_CRITIQUE
         result = checker_agent(_base_state())
         self.assertEqual(result["checker_retry_count"], 0)
-        self.assertIsNone(result["checker_critique"])
+        self.assertEqual(result["checker_critique"], LLM_FAILED_CRITIQUE)
         self.assertNotIn("attraction_agent", result.get("dirty_agents", []))
 
 

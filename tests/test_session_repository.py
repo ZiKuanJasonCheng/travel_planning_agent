@@ -46,11 +46,11 @@ def test_get_nonexistent_returns_none(clean_sessions):
 def test_update(clean_sessions):
     repo = SessionRepository()
     repo.create("sess-002", SAMPLE_STATE)
-    updated = {**SAMPLE_STATE, "status": "completed", "feedback": "looks great"}
+    updated = {**SAMPLE_STATE, "status": "completed", "feedback": ["looks great"]}
     repo.update("sess-002", updated)
     result = repo.get("sess-002")
     assert result["status"] == "completed"
-    assert result["feedback"] == "looks great"
+    assert result["feedback"] == ["looks great"]
 
 
 @pytest.mark.integration

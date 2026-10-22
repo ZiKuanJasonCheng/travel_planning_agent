@@ -2,14 +2,16 @@ import logging
 from fastapi import Query, FastAPI, APIRouter, Response, status, HTTPException
 from session import create_session, get_session, update_session
 from pydantic import BaseModel, Field, field_validator, model_validator
-from typing import Optional, List
+from typing import Annotated, List, Optional
 from datetime import timedelta
 from states.trip_state import TripState, default_transport_options
 from states.trip_dates import parse_iso_date
 from agents.final_output import final_output_node
+from orchestration.final_output_cache import get_cached_final_output
 from orchestration.human_feedback import apply_user_feedback
 from orchestration.graph_runner import run_until_needing_feedback_or_finished
 from orchestration.llm_feedback_parsing import parse_feedback_with_llm
+from copy import deepcopy
 from services.geocoding import check_city_granularity
 from logging_config import setup_request_logging
 
@@ -52,7 +54,9 @@ class RequestModel(BaseModel):
 
 class FeedbackModel(BaseModel):
     session_id: str = Field(min_length=1, max_length=100)
-    feedback: str = Field(min_length=1, max_length=2000)
+    # One entry per message the user submitted this round. Only this round's
+    # messages are held — earlier rounds are not accumulated.
+    feedback: List[Annotated[str, Field(min_length=1, max_length=2000)]] = Field(min_length=1)
 
     # Optional trip revisions. Unlike RequestModel these are never derived
     # here: resolving days against a start_date needs the session's existing
@@ -69,6 +73,25 @@ class FeedbackModel(BaseModel):
         if start is not None and end is not None and end <= start:
             raise ValueError("end_date must be at least one day after start_date")
         return self
+
+
+def run_from_cached_plan(state: dict, cached_output: dict) -> dict:
+    """Turn a request state plus a cached payload into a persisted session.
+
+    The session must hold the plan itself, not just the client payload: a later
+    feedback round diffs the cached options against the agreed constraints, and
+    `_build_search_text`/the agents read `constraints`. `dirty_agents` is empty
+    so nothing replans until the traveler asks for a change.
+    """
+    return {
+        **state,
+        "constraints": deepcopy(state.get("new_constraints") or {}),
+        "transport_options": deepcopy(cached_output.get("transport_options") or default_transport_options()),
+        "accommodation_options": deepcopy(cached_output.get("accommodation_options") or []),
+        "itinerary": deepcopy(cached_output.get("itinerary") or []),
+        "dirty_agents": [],
+        "status": "is_waiting_for_feedback",
+    }
 
 
 @router.post("/trip/start")
@@ -114,6 +137,21 @@ def start_trip(param: RequestModel):
         "log_file": log_file,
     }
     logger.info(f"start_trip(): state: {state}", extra={"to_terminal": False})
+
+    # A brand-new trip that matches a recently verified run can skip the whole
+    # pipeline. The cached plan still becomes a real session so the traveler can
+    # submit feedback against it; only the client-facing session_id is renewed.
+    cached_output = get_cached_final_output(state)
+    if cached_output is not None:
+        cached_state = run_from_cached_plan(state, cached_output)
+        session_id = create_session(cached_state)
+        cached_state["session_id"] = session_id  # Agents might use session_id
+        update_session(session_id, cached_state)
+
+        logger.info(
+            f"start_trip(): served from cache with status={cached_state['status']}"
+        )
+        return {"status": cached_state["status"], **cached_output, "session_id": session_id}
 
     session_id = create_session(state)
     state["session_id"] = session_id  # Agents might use session_id
