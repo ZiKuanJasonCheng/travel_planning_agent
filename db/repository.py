@@ -17,7 +17,7 @@ def _build_search_text(state: dict) -> str:
     parts = [
         state.get("destination") or "",
         state.get("origin") or "",
-        state.get("feedback") or "",
+        " ".join(state.get("feedback") or []),
         state.get("checker_critique") or "",
         " ".join(state.get("preferences") or []),
     ]

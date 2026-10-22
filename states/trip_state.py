@@ -23,7 +23,7 @@ class TripState(TypedDict, total=False):
     accommodation_options: List[dict]
     itinerary: List[dict]
 
-    feedback: Optional[str]
+    feedback: Optional[List[str]]  # This round's feedback messages; replaces the previous round's
     constraints: Constraints          # Last round's AGREED (merged) constraints — not touched by apply_user_feedback
     new_constraints: Optional[dict]   # This round's raw parsed feedback, pre-merge
 

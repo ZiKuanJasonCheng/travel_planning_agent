@@ -8,7 +8,7 @@ from api.apis import FeedbackModel
 
 class FeedbackModelFieldTests(unittest.TestCase):
     def test_optional_trip_fields_default_to_none(self):
-        param = FeedbackModel(session_id="s1", feedback="too expensive")
+        param = FeedbackModel(session_id="s1", feedback=["too expensive"])
 
         self.assertIsNone(param.start_date)
         self.assertIsNone(param.end_date)
@@ -18,7 +18,7 @@ class FeedbackModelFieldTests(unittest.TestCase):
     def test_accepts_trip_revisions(self):
         param = FeedbackModel(
             session_id="s1",
-            feedback="pushing it back a week",
+            feedback=["pushing it back a week"],
             start_date="2026-11-01",
             days=4,
             num_people=4,
@@ -30,18 +30,18 @@ class FeedbackModelFieldTests(unittest.TestCase):
 
     def test_rejects_malformed_iso_date(self):
         with self.assertRaises(ValidationError):
-            FeedbackModel(session_id="s1", feedback="f", start_date="11/01/2026")
+            FeedbackModel(session_id="s1", feedback=["f"], start_date="11/01/2026")
 
     def test_rejects_end_date_not_after_start_date(self):
         with self.assertRaises(ValidationError):
             FeedbackModel(
-                session_id="s1", feedback="f",
+                session_id="s1", feedback=["f"],
                 start_date="2026-11-01", end_date="2026-11-01",
             )
 
     def test_rejects_out_of_range_num_people(self):
         with self.assertRaises(ValidationError):
-            FeedbackModel(session_id="s1", feedback="f", num_people=0)
+            FeedbackModel(session_id="s1", feedback=["f"], num_people=0)
 
 
 class ApplyTripFieldOverrideTests(unittest.TestCase):
@@ -76,7 +76,7 @@ class ApplyTripFieldOverrideTests(unittest.TestCase):
         from orchestration.human_feedback import apply_user_feedback
 
         state = self._state()
-        apply_user_feedback(state, "later", {"start_date": "2026-10-03"})
+        apply_user_feedback(state, ["later"], {"start_date": "2026-10-03"})
 
         self.assertEqual(state["start_date"], "2026-10-03")
         self.assertEqual(state["end_date"], "2026-10-06")
@@ -88,14 +88,14 @@ class ApplyTripFieldOverrideTests(unittest.TestCase):
 
         state = self._state()
         with self.assertRaises(ValueError):
-            apply_user_feedback(state, "much later", {"start_date": "2026-12-01"})
+            apply_user_feedback(state, ["much later"], {"start_date": "2026-12-01"})
 
     @patch("orchestration.human_feedback.parse_feedback_with_llm", return_value=None)
     def test_date_change_marks_all_three_agents_dirty(self, mock_parse):
         from orchestration.human_feedback import apply_user_feedback
 
         state = self._state()
-        apply_user_feedback(state, "later", {"start_date": "2026-10-03"})
+        apply_user_feedback(state, ["later"], {"start_date": "2026-10-03"})
 
         self.assertEqual(
             state["dirty_agents"],
@@ -107,7 +107,7 @@ class ApplyTripFieldOverrideTests(unittest.TestCase):
         from orchestration.human_feedback import apply_user_feedback
 
         state = self._state()
-        apply_user_feedback(state, "longer", {"days": 8})
+        apply_user_feedback(state, ["longer"], {"days": 8})
 
         self.assertEqual(state["days"], 8)
         self.assertEqual(state["start_date"], "2026-10-01")
@@ -118,7 +118,7 @@ class ApplyTripFieldOverrideTests(unittest.TestCase):
         from orchestration.human_feedback import apply_user_feedback
 
         state = self._state()
-        apply_user_feedback(state, "shorter", {"end_date": "2026-10-04"})
+        apply_user_feedback(state, ["shorter"], {"end_date": "2026-10-04"})
 
         self.assertEqual(state["end_date"], "2026-10-04")
         self.assertEqual(state["days"], 3)
@@ -130,7 +130,7 @@ class ApplyTripFieldOverrideTests(unittest.TestCase):
         from orchestration.human_feedback import apply_user_feedback
 
         state = self._state()
-        apply_user_feedback(state, "shifting it a few days", {"end_date": "2026-10-10", "days": 9})
+        apply_user_feedback(state, ["shifting it a few days"], {"end_date": "2026-10-10", "days": 9})
 
         self.assertEqual(state["end_date"], "2026-10-10")
         self.assertEqual(state["days"], 9)
@@ -142,7 +142,7 @@ class ApplyTripFieldOverrideTests(unittest.TestCase):
         from orchestration.human_feedback import apply_user_feedback
 
         state = self._state()
-        changed = apply_user_feedback(state, "same again", {"end_date": "2026-10-06", "days": 5})
+        changed = apply_user_feedback(state, ["same again"], {"end_date": "2026-10-06", "days": 5})
 
         self.assertFalse(changed)
         self.assertEqual(state["start_date"], "2026-10-01")
@@ -168,7 +168,7 @@ class ApplyTripFieldOverrideTests(unittest.TestCase):
         from orchestration.human_feedback import apply_user_feedback
 
         state = self._state()
-        changed = apply_user_feedback(state, "four of us now", {"num_people": 4})
+        changed = apply_user_feedback(state, ["four of us now"], {"num_people": 4})
 
         self.assertTrue(changed)
         self.assertEqual(state["num_people"], 4)
@@ -190,7 +190,7 @@ class ApplyTripFieldOverrideTests(unittest.TestCase):
         from orchestration.human_feedback import apply_user_feedback
 
         state = self._state()
-        changed = apply_user_feedback(state, "no constraints here", None)
+        changed = apply_user_feedback(state, ["no constraints here"], None)
 
         self.assertFalse(changed)
         self.assertEqual(state["start_date"], "2026-10-01")
@@ -201,7 +201,7 @@ class ApplyTripFieldOverrideTests(unittest.TestCase):
         from orchestration.human_feedback import apply_user_feedback
 
         state = self._state()
-        changed = apply_user_feedback(state, "", {"num_people": 3})
+        changed = apply_user_feedback(state, [""], {"num_people": 3})
 
         self.assertTrue(changed)
         self.assertEqual(state["num_people"], 3)
@@ -217,7 +217,7 @@ class ApplyTripFieldOverrideTests(unittest.TestCase):
         state["days"] = None
 
         with self.assertRaises(RuntimeError):
-            apply_user_feedback(state, "later", {"start_date": "2026-10-03"})
+            apply_user_feedback(state, ["later"], {"start_date": "2026-10-03"})
 
     @patch("orchestration.human_feedback.parse_feedback_with_llm", return_value=None)
     def test_constraint_and_trip_change_combine_into_one_dirty_set(self, mock_parse):
@@ -230,7 +230,7 @@ class ApplyTripFieldOverrideTests(unittest.TestCase):
         mock_parse.return_value = mock_parsed
 
         state = self._state()
-        apply_user_feedback(state, "Shibuya and a day later", {"start_date": "2026-10-02"})
+        apply_user_feedback(state, ["Shibuya and a day later"], {"start_date": "2026-10-02"})
 
         self.assertEqual(
             state["dirty_agents"],
@@ -261,7 +261,7 @@ class RerunPlanningInjectionTests(unittest.TestCase):
         from orchestration.human_feedback import apply_user_feedback
 
         state = self._state()
-        apply_user_feedback(state, "let's go later", {"start_date": "2026-10-03"})
+        apply_user_feedback(state, ["let's go later"], {"start_date": "2026-10-03"})
 
         for category in ("transport", "accommodation", "attraction"):
             self.assertIs(
@@ -274,7 +274,7 @@ class RerunPlanningInjectionTests(unittest.TestCase):
         from orchestration.human_feedback import apply_user_feedback
 
         state = self._state()
-        apply_user_feedback(state, "four of us now", {"num_people": 4})
+        apply_user_feedback(state, ["four of us now"], {"num_people": 4})
 
         for category in ("transport", "accommodation", "attraction"):
             self.assertIs(state["new_constraints"][category]["rerun_planning"], True)
@@ -284,7 +284,7 @@ class RerunPlanningInjectionTests(unittest.TestCase):
         from orchestration.human_feedback import apply_user_feedback
 
         state = self._state()
-        apply_user_feedback(state, "a bit longer", {"days": 8})
+        apply_user_feedback(state, ["a bit longer"], {"days": 8})
 
         for category in ("transport", "accommodation", "attraction"):
             self.assertIs(state["new_constraints"][category]["rerun_planning"], True)
@@ -301,7 +301,7 @@ class RerunPlanningInjectionTests(unittest.TestCase):
         mock_parse.return_value = mock_parsed
 
         state = self._state()
-        apply_user_feedback(state, "Shibuya and a day later", {"start_date": "2026-10-02"})
+        apply_user_feedback(state, ["Shibuya and a day later"], {"start_date": "2026-10-02"})
 
         accommodation = state["new_constraints"]["accommodation"]
         self.assertEqual(accommodation["preference"], {"area": "Shibuya"})
@@ -315,7 +315,7 @@ class RerunPlanningInjectionTests(unittest.TestCase):
         from orchestration.human_feedback import apply_user_feedback
 
         state = self._state()
-        changed = apply_user_feedback(state, "same again", {"start_date": "2026-10-01"})
+        changed = apply_user_feedback(state, ["same again"], {"start_date": "2026-10-01"})
 
         self.assertFalse(changed)
         self.assertNotIn("new_constraints", state)
@@ -332,7 +332,7 @@ class RerunPlanningInjectionTests(unittest.TestCase):
         mock_parse.return_value = mock_parsed
 
         state = self._state()
-        apply_user_feedback(state, "stay in Shinjuku instead", None)
+        apply_user_feedback(state, ["stay in Shinjuku instead"], None)
 
         self.assertNotIn("rerun_planning", state["new_constraints"]["accommodation"])
         self.assertNotIn("transport", state["new_constraints"])
@@ -348,11 +348,11 @@ class RerunPlanningInjectionTests(unittest.TestCase):
 
         transport = {"transport_type": "flight", "outbound_air_ticket_preference": {"airlines": ["CX"]}}
         state = self._state(
-            feedback="earlier",
+            feedback=["earlier"],
             constraints={"transport": transport},
             transport_options={"flight": {"outbound": [{"airline": "CX"}], "inbound": [{"airline": "CX"}]}},
         )
-        apply_user_feedback(state, "earlier", {"start_date": "2026-10-03"})
+        apply_user_feedback(state, ["earlier"], {"start_date": "2026-10-03"})
 
         merged = merge_constraints(transport, state["new_constraints"]["transport"])
         self.assertEqual(_search_mode(state, transport, merged), "full")
@@ -365,13 +365,13 @@ class RerunPlanningInjectionTests(unittest.TestCase):
         from orchestration.merge_constraints import resolve_category_constraints
 
         state = self._state(
-            feedback="earlier",
+            feedback=["earlier"],
             constraints={
                 "accommodation": {"preference": {"area": "Shibuya"}},
                 "attraction": {"preference": {"styles": ["shopping"]}},
             },
         )
-        apply_user_feedback(state, "earlier", {"start_date": "2026-10-03"})
+        apply_user_feedback(state, ["earlier"], {"start_date": "2026-10-03"})
 
         for category in ("accommodation", "attraction"):
             merged, unchanged = resolve_category_constraints(state, category)

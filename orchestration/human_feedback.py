@@ -89,9 +89,10 @@ def _apply_trip_field_overrides(state: TripState, overrides: Optional[dict]) -> 
     return changed
 
 
-def apply_user_feedback(state: TripState, feedback, overrides: Optional[dict] = None) -> bool:
+def apply_user_feedback(state: TripState, feedback: list, overrides: Optional[dict] = None) -> bool:
     """
-    Returns True if constraints changed, False otherwise
+    `feedback` is this round's list of messages. It replaces state["feedback"];
+    rounds are not accumulated. Returns True if constraints changed, False otherwise
     """
     # Trip-wide revisions are independent of the LLM-extracted constraints, so
     # they apply even when the feedback text parses to nothing.
@@ -99,7 +100,7 @@ def apply_user_feedback(state: TripState, feedback, overrides: Optional[dict] = 
 
     new_constraints = None
     try:
-        new_constraints = parse_feedback_with_llm(feedback)
+        new_constraints = parse_feedback_with_llm("; ".join(feedback or []))
     except Exception as e:
         logger.error(f"apply_user_feedback(): an error occurred while parsing feedback by LLM. Error message: {e}")
         raise
@@ -111,7 +112,7 @@ def apply_user_feedback(state: TripState, feedback, overrides: Optional[dict] = 
     else:
         dict_new_constraints = new_constraints.model_dump(exclude_none=True)
 
-    state["feedback"] = feedback
+    state["feedback"] = list(feedback or [])
 
     existing_constraints = state.get("constraints", {})
     # Constraints are no longer merged/persisted here — each agent merges

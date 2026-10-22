@@ -126,7 +126,7 @@ class AttractionAgentSkipLogicTests(unittest.TestCase):
         state = {
             "destination": "Tokyo", "origin": "Hong Kong", "days": 3, "num_people": 2,
             "start_date": "2026-09-10",
-            "feedback": "some prior feedback",
+            "feedback": ["some prior feedback"],
             # Already carries the unlimited-price sentinel, as a real prior round's
             # attraction_agent call would have persisted it via _fill_unlimited_price.
             "constraints": {"attraction": {"preference": {"styles": ["natural scenery"], "max_price_per_ticket": 1_000_000_000}}},

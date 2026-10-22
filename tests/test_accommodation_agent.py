@@ -89,7 +89,7 @@ class AccommodationAgentSkipLogicTests(unittest.TestCase):
         state = {
             "destination": "Tokyo",
             "days": 4,
-            "feedback": "some prior feedback",
+            "feedback": ["some prior feedback"],
             "constraints": {
                 "accommodation": {"preference": {"max_price_per_night": 150}}
             },
@@ -232,7 +232,7 @@ class HotelSelectionTests(unittest.TestCase):
         state = {
             "destination": "Tokyo",
             "days": 4,
-            "feedback": "some prior feedback",
+            "feedback": ["some prior feedback"],
             "constraints": {"accommodation": {"preference": {"area": "Tokyo"}}},
             "new_constraints": {"accommodation": {"preference": {"area": "Shinjuku"}}},
             "transport_options": {"railway": [], "flight": {"outbound": [], "inbound": []}},

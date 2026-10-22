@@ -79,13 +79,13 @@ class SearchModeTests(unittest.TestCase):
 
     def test_rerun_planning_returns_full(self):
         from agents.air_ticket import _search_mode
-        state = {"feedback": "please try again"}
+        state = {"feedback": ["please try again"]}
         self.assertEqual(_search_mode(state, {}, {"rerun_planning": True}), "full")
 
     def test_outbound_only_when_merged_outbound_preference_differs(self):
         from agents.air_ticket import _search_mode
         state = {
-            "feedback": "no layovers on the way there",
+            "feedback": ["no layovers on the way there"],
             "transport_options": {"flight": {"outbound": [], "inbound": []}},
         }
         existing = {}
@@ -95,7 +95,7 @@ class SearchModeTests(unittest.TestCase):
     def test_inbound_only_when_merged_inbound_preference_differs(self):
         from agents.air_ticket import _search_mode
         state = {
-            "feedback": "business class on the way back",
+            "feedback": ["business class on the way back"],
             "transport_options": {"flight": {"outbound": [], "inbound": []}},
         }
         existing = {}
@@ -105,7 +105,7 @@ class SearchModeTests(unittest.TestCase):
     def test_full_when_both_directions_differ(self):
         from agents.air_ticket import _search_mode
         state = {
-            "feedback": "no layovers either way",
+            "feedback": ["no layovers either way"],
             "transport_options": {"flight": {"outbound": [], "inbound": []}},
         }
         existing = {}
@@ -120,7 +120,7 @@ class SearchModeTests(unittest.TestCase):
         value is identical to what's already there must NOT trigger a re-search."""
         from agents.air_ticket import _search_mode
         state = {
-            "feedback": "business class please",
+            "feedback": ["business class please"],
             "transport_options": {"flight": {"outbound": [], "inbound": []}},
         }
         existing = {"outbound_air_ticket_preference": {"flight_class": "business"}}
@@ -130,7 +130,7 @@ class SearchModeTests(unittest.TestCase):
     def test_none_when_feedback_unrelated_to_transport(self):
         from agents.air_ticket import _search_mode
         state = {
-            "feedback": "add a museum on day 2",
+            "feedback": ["add a museum on day 2"],
             "transport_options": {"flight": {"outbound": [], "inbound": []}},
         }
         self.assertEqual(_search_mode(state, {}, {}), "none")
@@ -138,7 +138,7 @@ class SearchModeTests(unittest.TestCase):
     def test_full_when_transport_type_switched_to_flight_with_no_existing_legs(self):
         from agents.air_ticket import _search_mode
         state = {
-            "feedback": "actually let's fly instead",
+            "feedback": ["actually let's fly instead"],
             "transport_options": {"flight": {"outbound": [], "inbound": []}},
         }
         existing = {"transport_type": "train"}
@@ -148,7 +148,7 @@ class SearchModeTests(unittest.TestCase):
     def test_none_when_transport_type_switched_but_flights_already_exist(self):
         from agents.air_ticket import _search_mode
         state = {
-            "feedback": "actually let's fly instead",
+            "feedback": ["actually let's fly instead"],
             "transport_options": {"flight": {"outbound": [{"airline": "CX"}], "inbound": []}},
         }
         existing = {"transport_type": "train"}
@@ -158,7 +158,7 @@ class SearchModeTests(unittest.TestCase):
     def test_outbound_only_when_last_run_had_full_error_on_outbound(self):
         from agents.air_ticket import _search_mode, _ERROR_MESSAGE
         state = {
-            "feedback": "add a museum on day 2",
+            "feedback": ["add a museum on day 2"],
             "transport_options": {
                 "flight": {
                     "outbound": [dict(_ERROR_MESSAGE)],
@@ -171,7 +171,7 @@ class SearchModeTests(unittest.TestCase):
     def test_inbound_only_when_last_run_had_partial_error_on_inbound(self):
         from agents.air_ticket import _search_mode
         state = {
-            "feedback": "add a museum on day 2",
+            "feedback": ["add a museum on day 2"],
             "transport_options": {
                 "flight": {
                     "outbound": [{"airline": "CX", "reason": "Good option"}],
@@ -472,7 +472,7 @@ class AirTicketAgentIntegrationTests(unittest.TestCase):
 
         existing_inbound = [{"airline": "UO", "price": 250, "depart_time": "19:00:00", "reason": "kept from before"}]
         state = self._base_state(
-            feedback="no layovers on the way there",
+            feedback=["no layovers on the way there"],
             new_constraints={"transport": {"outbound_air_ticket_preference": {"direct_flights_only": True}}},
             transport_options={"railway": [], "flight": {"outbound": [], "inbound": existing_inbound}},
         )
@@ -529,7 +529,7 @@ class AirTicketAgentIntegrationTests(unittest.TestCase):
         mock_get_svc.return_value = mock_svc
 
         state = self._base_state(
-            feedback="please try again",
+            feedback=["please try again"],
             constraints={"transport": {"rerun_planning": True}},
         )
 
@@ -549,7 +549,7 @@ class AirTicketAgentIntegrationTests(unittest.TestCase):
         existing_outbound = [{"airline": "CX", "flight_class": "business", "reason": "Good option"}]
         existing_inbound = [{"airline": "CX", "flight_class": "business", "reason": "Good option"}]
         state = self._base_state(
-            feedback="business class please",
+            feedback=["business class please"],
             constraints={"transport": {
                 "outbound_air_ticket_preference": {"flight_class": "business", "max_price_per_ticket": 1_000_000_000},
                 "inbound_air_ticket_preference": {"flight_class": "business", "max_price_per_ticket": 1_000_000_000},
@@ -575,7 +575,7 @@ class AirTicketAgentIntegrationTests(unittest.TestCase):
         # "existing" already carries the unlimited-price sentinel, as a real prior
         # round's air_ticket_agent call would have persisted it via _fill_unlimited_price.
         state = self._base_state(
-            feedback="business class please",
+            feedback=["business class please"],
             constraints={"transport": {"outbound_air_ticket_preference": {"flight_class": "business", "max_price_per_ticket": 1_000_000_000}}},
             new_constraints={"transport": {"outbound_air_ticket_preference": {"flight_class": "business"}}},
         )

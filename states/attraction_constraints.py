@@ -11,10 +11,9 @@ class PreferenceConstraint(BaseModel):
     max_price_per_ticket: Optional[int] = Field(
         None,
         description=(
-            "Maximum acceptable price for an entrance ticket, in USD. Leave null when the user "
-            "simply hasn't mentioned a price. If the user explicitly says price doesn't matter or "
-            "there's no budget limit (e.g. 'I don't care about the price', 'any price is fine'), "
-            f"set this to {UNLIMITED_PRICE} instead of null."
+            "Maximum acceptable price for an entrance ticket, in USD. No need to leave anything when the user "
+            "simply hasn't mentioned a price, or if the user explicitly says price doesn't matter or "
+            "there's no budget limit (e.g. 'I don't care about the price', 'any price is fine')."
         ),
     )
 

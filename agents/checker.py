@@ -9,6 +9,11 @@ logger = logging.getLogger(__name__)
 
 _MAX_RETRIES = 2
 
+# Recorded in checker_critique when the checker LLM call itself fails. A None
+# critique means the itinerary genuinely passed, so a failure must not leave
+# None behind — otherwise a crashed check would look like a clean approval.
+LLM_FAILED_CRITIQUE = "LLM called failed"
+
 
 def checker_agent(state: TripState) -> TripState:
     destination = state.get("destination", "")
@@ -39,7 +44,7 @@ def checker_agent(state: TripState) -> TripState:
         )
     except Exception as e:
         logger.error(f"checker_agent(): LLM call failed ({e}), treating as pass")
-        next_state = {**state, "checker_retry_count": 0, "checker_critique": None}
+        next_state = {**state, "checker_retry_count": 0, "checker_critique": LLM_FAILED_CRITIQUE}
         if state.get("log_trace"):
             log_trace(
                 next_state,

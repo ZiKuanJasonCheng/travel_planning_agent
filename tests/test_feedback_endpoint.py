@@ -50,7 +50,7 @@ def test_start_date_override_within_window_keeps_existing_end_date():
     """start_date alone is checked against the session's end_date, not shifted."""
     param = FeedbackModel(
         session_id="sess-1",
-        feedback="starting a couple of days later",
+        feedback=["starting a couple of days later"],
         start_date="2026-10-03",
     )
 
@@ -70,7 +70,7 @@ def test_start_date_after_existing_end_date_is_rejected():
     """Session ends 2026-10-06, so a bare start_date later than that is invalid."""
     param = FeedbackModel(
         session_id="sess-1",
-        feedback="push it way back",
+        feedback=["push it way back"],
         start_date="2026-12-01",
     )
 
@@ -84,7 +84,7 @@ def test_start_date_after_existing_end_date_is_rejected():
 def test_start_date_with_explicit_consistent_end_date_succeeds():
     param = FeedbackModel(
         session_id="sess-1",
-        feedback="moving the whole trip",
+        feedback=["moving the whole trip"],
         start_date="2026-12-01",
         end_date="2026-12-04",
     )
@@ -97,7 +97,7 @@ def test_start_date_with_explicit_consistent_end_date_succeeds():
 
 
 def test_days_only_override_recomputes_end_date_from_session_start():
-    param = FeedbackModel(session_id="sess-1", feedback="make it longer", days=8)
+    param = FeedbackModel(session_id="sess-1", feedback=["make it longer"], days=8)
 
     _, captured, persisted = _run_feedback(param, _session_state())
 
@@ -108,7 +108,7 @@ def test_days_only_override_recomputes_end_date_from_session_start():
 
 
 def test_end_date_only_override_recomputes_days():
-    param = FeedbackModel(session_id="sess-1", feedback="cut it short", end_date="2026-10-04")
+    param = FeedbackModel(session_id="sess-1", feedback=["cut it short"], end_date="2026-10-04")
 
     _, captured, _ = _run_feedback(param, _session_state())
 
@@ -118,7 +118,7 @@ def test_end_date_only_override_recomputes_days():
 
 
 def test_num_people_override_is_forwarded():
-    param = FeedbackModel(session_id="sess-1", feedback="four of us", num_people=4)
+    param = FeedbackModel(session_id="sess-1", feedback=["four of us"], num_people=4)
 
     _, captured, persisted = _run_feedback(param, _session_state())
 
@@ -128,7 +128,7 @@ def test_num_people_override_is_forwarded():
 
 def test_no_overrides_leaves_dates_untouched_and_skips_graph():
     """A neutral feedback round that parses to nothing reports no change."""
-    param = FeedbackModel(session_id="sess-1", feedback="looks good")
+    param = FeedbackModel(session_id="sess-1", feedback=["looks good"])
 
     response, captured, persisted = _run_feedback(param, _session_state())
 
