@@ -1,10 +1,10 @@
 from typing import Optional
-from pydantic import BaseModel, Field
-
-from orchestration.merge_constraints import UNLIMITED_PRICE
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PreferenceConstraint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     styles: Optional[list[str]] = Field(None, description="Preferred tourism styles or things to do e.g. natural scenery, historical sites, shopping, culture experiences, local food, etc. Also include additional constraints if user specifies, for example, 'shopping at least one day', 'museum only for two days', etc.")
     exclusions: Optional[list[str]] = Field(None, description="Places, styles, or things to exclude e.g. Instagrammable spot, spicy food, etc.")
     must_go_places: Optional[list[str]] = Field(None, description="Some must-go places if specified")
@@ -19,6 +19,8 @@ class PreferenceConstraint(BaseModel):
 
 
 class AttractionConstraint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     preference: Optional[PreferenceConstraint] = None
     rerun_planning: Optional[bool] = Field(
         None,
