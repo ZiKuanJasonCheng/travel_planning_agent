@@ -1,13 +1,15 @@
-from typing import Optional
-from pydantic import BaseModel, Field
+from typing import Optional, Literal
+from pydantic import BaseModel, ConfigDict, Field
 
 from orchestration.merge_constraints import UNLIMITED_PRICE
 
 
 class FlightPreferenceConstraint(BaseModel):
-    airlines: Optional[list[str]] = Field(None, description="Preferred airline(s)")
-    flight_class: Optional[str] = Field(None, description="Preferred flight class")
-    excluded_airlines: Optional[list[str]] = Field(None, description="Airline(s) to be excluded")
+    model_config = ConfigDict(extra="forbid")
+
+    airlines: Optional[list[str]] = Field(None, description="Preferred airline(s). No need to include 'Airline', but just the name itself.")
+    flight_class: Optional[Literal["first", "business", "premium economy", "economy"]] = Field(None, description="Preferred flight class.")
+    excluded_airlines: Optional[list[str]] = Field(None, description="Airline(s) to be excluded. No need to include 'Airline', but just the name itself.")
     accept_redeye_flights: Optional[bool] = Field(None, description="Whether to accept red-eye flights (departure 23:30–05:29). Null means not explicitly stated; the agent infers False when preferred_departure_timeslots is set.")
     direct_flights_only: Optional[bool] = Field(None, description="Whether to only accept direct flights. Null means not explicitly stated.")
     preferred_departure_timeslots: Optional[list[str]] = Field(
@@ -33,10 +35,14 @@ class FlightPreferenceConstraint(BaseModel):
 
 
 class RailwayTicketPreferenceConstraint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     max_price_per_ticket: Optional[int] = Field(None, description="Maximum acceptable price for a ticket")
 
 
 class TransportConstraint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     outbound_air_ticket_preference: Optional[FlightPreferenceConstraint] = Field(
         None,
         description=(

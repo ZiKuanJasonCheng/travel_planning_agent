@@ -1,10 +1,10 @@
 from typing import Optional
-from pydantic import BaseModel, Field
-
-from orchestration.merge_constraints import UNLIMITED_PRICE
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PreferenceConstraint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     area: Optional[str] = Field(None, description="Preferred area or location in a city/region")
     hotel_style: Optional[str] = Field(None, description="Hotel style or type")
     exclusions: Optional[list[str]] = Field(None, description="Hotel types, areas, or amenities to exclude e.g. hostel, shared bathroom, far from city center, etc.")
@@ -19,6 +19,8 @@ class PreferenceConstraint(BaseModel):
 
 
 class AccommodationConstraint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     preference: Optional[PreferenceConstraint] = None
     rerun_planning: Optional[bool] = Field(
         None,
